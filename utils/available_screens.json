@@ -1,0 +1,20 @@
+{
+    "screens": [
+        {
+            "title": "timesheet_analysis",
+            "description": "Timesheet Analysis"
+        },
+        {
+            "title": "permit_control",
+            "description": "Permit Control"
+        },
+        {
+            "title": "accounting_indicators",
+            "description": "Accounting Indicators"
+        },
+        {
+            "title": "it_projects",
+            "description": "IT Projects"
+        }
+    ]
+}

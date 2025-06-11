@@ -1,0 +1,72 @@
+{
+    "users": [
+        {
+            "login": "vitor@premiumgrpinc.com",
+            "name": "Vitor Bitencourt",
+            "password": "teste159357",
+            "roles": [
+                "developer",
+                "timesheet_admin",
+                "permits_admin",
+                "accounting_admin",
+                "ti_admin"
+            ],
+            "screens": [
+                "timesheet_analysis",
+                "permit_control",
+                "accounting_indicators",
+                "it_projects"
+            ]
+        },
+        {
+            "login": "thiago@premiumgrpinc.com",
+            "name": "Thiago Magalh\u00e3es",
+            "password": "teste159357",
+            "roles": [
+                "user"
+            ],
+            "screens": [
+                "timesheet_analysis",
+                "permit_control",
+                "accounting_indicators",
+                "it_projects"
+            ]
+        },
+        {
+            "login": "italo@premiumgrpinc.com",
+            "name": "Italo Jardim",
+            "password": "teste159357",
+            "roles": [
+                "user",
+                "timesheet_admin"
+            ],
+            "screens": [
+                "timesheet_analysis"
+            ]
+        },
+        {
+            "login": "victor@premiumgrpinc.com",
+            "name": "Victor Paiva",
+            "password": "teste159357",
+            "roles": [
+                "user",
+                "permits_admin"
+            ],
+            "screens": [
+                "permit_control"
+            ]
+        },
+        {
+            "login": "williana@premiumgrpinc.com",
+            "name": "Williana Oliveira",
+            "password": "teste159357",
+            "roles": [
+                "user",
+                "accounting_admin"
+            ],
+            "screens": [
+                "accounting_indicators"
+            ]
+        }
+    ]
+}
