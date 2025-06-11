@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 from database.database_timesheet_analysis import load_data, sync_and_reload, add_register, add_user
 from utils.st_custom import st_custom_table
+import json
+import os
 
 def initialize_modal_session_state():
     if "selected_date" not in st.session_state:
@@ -35,6 +37,12 @@ def initialize_modal_session_state():
         st.session_state.signup_corporation = ""
     if "signup_team" not in st.session_state:
         st.session_state.signup_team = ""
+    if "signup_login" not in st.session_state:
+        st.session_state.signup_login = ""
+    if "signup_password" not in st.session_state:
+        st.session_state.signup_password = ""
+    if "signup_confirm_password" not in st.session_state:
+        st.session_state.signup_confirm_password = ""
 
 def data_match():
     nome = st.session_state.selected_name
@@ -122,6 +130,31 @@ def add_and_refresh_register():
     except Exception as e:
         st.error(f"Error adding register: {str(e)}")
 
+def add_user_to_authorized_users_json(name, corporation, payrate, team, login, password):
+    path = os.path.join("utils", "authorized_users.json")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    # Evita duplicidade de login
+    for user in data["users"]:
+        if user["login"] == login:
+            return False, "Login já cadastrado."
+    new_user = {
+        "login": login,
+        "name": name,
+        "password": password,
+        "roles": ["user"],
+        "screens": [
+            "timesheet_analysis",
+            "permit_control",
+            "accounting_indicators",
+            "it_projects"
+        ]
+    }
+    data["users"].append(new_user)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+    return True, "Usuário cadastrado com sucesso."
+
 def add_and_refresh_user():
     """Add a new user and refresh the data"""
     try:
@@ -130,19 +163,34 @@ def add_and_refresh_user():
         corporation = st.session_state.get("signup_corporation", "")
         payrate = st.session_state.get("signup_payrate", 0.0)
         team = st.session_state.get("signup_team", "")
+        login = st.session_state.get("signup_login", "")
+        password = st.session_state.get("signup_password", "")
+        confirm_password = st.session_state.get("signup_confirm_password", "")
 
         # Validate required fields
-        if not name or not corporation or not team:
+        if not name or not corporation or not team or not login or not password or not confirm_password:
             st.error("Please fill in all required fields")
             return
+        if password != confirm_password:
+            st.error("Passwords do not match!")
+            return
 
-        # Add user
+        # Adiciona ao authorized_users.json
+        ok, msg = add_user_to_authorized_users_json(name, corporation, payrate, team, login, password)
+        if not ok:
+            st.error(msg)
+            return
+
+        # Add user (no banco de dados, se necessário)
         if add_user(name, payrate, corporation, team):
             # Clear form
             st.session_state.signup_name = ""
             st.session_state.signup_payrate = 0.0
             st.session_state.signup_corporation = ""
             st.session_state.signup_team = ""
+            st.session_state.signup_login = ""
+            st.session_state.signup_password = ""
+            st.session_state.signup_confirm_password = ""
 
             # Refresh data
             sync_and_reload()
@@ -330,6 +378,11 @@ def modal():
                         accept_new_options=True,
                         placeholder="Choose a team"
                     )
+
+                # Novos campos para login e senha
+                st.text_input("Login (e-mail)", key="signup_login", placeholder="Enter e-mail")
+                st.text_input("Password", key="signup_password", type="password", placeholder="Enter password")
+                st.text_input("Confirm Password", key="signup_confirm_password", type="password", placeholder="Repeat password")
                 
                 st.button("Add User",
                           key="add_user",
