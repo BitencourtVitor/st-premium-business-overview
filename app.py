@@ -81,7 +81,7 @@ def show_header():
         st.subheader("Business Operations Review | Welcome, " + st.session_state['user_data']['name'])
     with col2:
         if st.session_state['user_data']:
-            if st.button(":material/settings:", help="Edit profile", type='secondary'):
+            if st.button(":material/settings:", help="Edit profile", type='secondary', disabled=True):
                 user_change_data_modal()
     with col3:
         if st.session_state['user_data']:
