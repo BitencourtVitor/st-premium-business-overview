@@ -207,10 +207,22 @@ def modal():
 
                 col1, col2, col3 = st.columns(3)
 
+                if "adding_h" not in st.session_state:
+                    st.session_state["adding_h"] = 0.0
+                if "removing_h" not in st.session_state:
+                    st.session_state["removing_h"] = 0.0
+                if "payrate_for_name" not in st.session_state:
+                    st.session_state["payrate_for_name"] = 0.0
+                if "adding_v" not in st.session_state:
+                    st.session_state["adding_v"] = 0.0
+                if "removing_v" not in st.session_state:
+                    st.session_state["removing_v"] = 0.0
+                if "total_reallocated" not in st.session_state:
+                    st.session_state["total_reallocated"] = 0.0
+
                 with col1:
                     added_time_hour = st.number_input(
                         "Add time/hour",
-                        value=0.0,
                         min_value=0.0,
                         step=0.25,
                         format="%.2f",
@@ -220,7 +232,6 @@ def modal():
                 with col2:
                     removed_time_hour = st.number_input(
                         "Remove time/hour",
-                        value=0.0,
                         min_value=0.0,
                         step=0.25,
                         format="%.2f",
@@ -240,7 +251,6 @@ def modal():
                 with col1:
                     added_value = st.number_input(
                         "Add $",
-                        value=0.0,
                         step=0.25,
                         format="%.2f",
                         disabled=True,
@@ -249,7 +259,6 @@ def modal():
                 with col2:
                     removed_value = st.number_input(
                         "Remove $",
-                        value=0.0,
                         step=0.25,
                         format="%.2f",
                         disabled=True,
@@ -258,7 +267,6 @@ def modal():
                 with col3:
                     total = st.number_input(
                         "Total",
-                        value=0.0,
                         step=0.25,
                         format="%.2f",
                         disabled=True,
