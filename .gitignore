@@ -5,6 +5,7 @@ __pycache__/
 
 # Credentials
 utils/credentials.json
+utils/credentials2.json
 
 # Environment
 .env
