@@ -69,8 +69,9 @@ def show_screen(user_data):
 
     # Filtros horizontalizados no topo
     with st.container(border=True):
-        st.subheader(":material/filter_list: Filters")
-        col1, col2, col3 = st.columns([1.5, 4.5, 4], gap="small")
+        col0, col1, col2, col3 = st.columns([1.5, 1.5, 3.5, 3.5], gap="small", vertical_alignment="center")
+        with col0:
+            st.subheader(":material/filter_list: Filters")
         with col1:
             st.pills(
                 "Corporation",
@@ -136,7 +137,7 @@ def show_screen(user_data):
         filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
 
     # Duas colunas principais para dados
-    col_dados, col_lateral = st.columns([3, 2], gap="small")
+    col_dados, col_lateral = st.columns([7, 3], gap="small")
     with col_dados:
         with st.container(border=True):
             st.subheader(":material/calendar_month: Analysis by Month")
