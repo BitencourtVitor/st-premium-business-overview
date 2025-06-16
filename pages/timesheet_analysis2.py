@@ -243,29 +243,50 @@ def show_screen(user_data):
         with st.container(border=True):
             # 1. Monthly Highlights
             st.subheader(":material/rocket_launch: Monthly Highlights")
-            if filtered_highlights:
-                for highlight in filtered_highlights:
-                    st.markdown(f"**{highlight.get('month', '')}/{highlight.get('year', '')}**")
-                    col_pos, col_neg = st.columns(2)
-                    with col_pos:
-                        st.markdown(":material/thumb_up:  **Positivos:**")
-                        for p in highlight.get('positive', []):
-                            st.markdown(f"- {p.get('title', '')}")
-                    with col_neg:
-                        st.markdown(":material/thumb_down:  **Negativos:**")
-                        for n in highlight.get('negative', []):
-                            st.markdown(f"- {n.get('title', '')}")
+            # Agrupar highlights por (month, year)
+            highlights_by_month = {}
+            for h in filtered_highlights:
+                key = (h.get('month', ''), h.get('year', ''))
+                if key not in highlights_by_month:
+                    highlights_by_month[key] = []
+                highlights_by_month[key].append(h)
+            if highlights_by_month:
+                for (month, year), highlights_list in sorted(highlights_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    with st.expander(f"{month}/{year}"):
+                        for highlight in highlights_list:
+                            col_pos, col_neg = st.columns(2)
+                            with col_pos:
+                                st.markdown(":material/thumb_up:  **Positivos:**")
+                                for p in highlight.get('positive', []):
+                                    st.markdown(f"- {p.get('title', '')}")
+                            with col_neg:
+                                st.markdown(":material/thumb_down:  **Negativos:**")
+                                for n in highlight.get('negative', []):
+                                    st.markdown(f"- {n.get('title', '')}")
             else:
                 st.info("Nenhum destaque mensal encontrado.")
 
             st.divider()
             # 2. Opportunities
             st.subheader(":material/emoji_objects: Opportunities")
-            if filtered_opportunities:
-                for opp in filtered_opportunities:
-                    st.markdown(f"**{opp.get('month', '')}/{opp.get('year', '')}**")
-                    for o in opp.get('opportunity_list', []):
-                        with st.expander(f"{o.get('title', '')}"):
+            # Agrupar opportunities por (month, year)
+            opportunities_by_month = {}
+            for o in filtered_opportunities:
+                key = (o.get('month', ''), o.get('year', ''))
+                if key not in opportunities_by_month:
+                    opportunities_by_month[key] = []
+                opportunities_by_month[key].append(o)
+            if opportunities_by_month:
+                for (month, year), opp_list in sorted(opportunities_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    with st.expander(f"{month}/{year}"):
+                        opp_blocks = []
+                        for opp in opp_list:
+                            for o in opp.get('opportunity_list', []):
+                                opp_blocks.append(o)
+                        for idx, o in enumerate(opp_blocks):
+                            if idx > 0:
+                                st.divider()
+                            st.markdown(f"#### {o.get('title', '')}")
                             st.markdown(":material/priority_high:  **Desafios:**")
                             for c in o.get('challenges', []):
                                 st.markdown(f"- {c}")
@@ -280,34 +301,37 @@ def show_screen(user_data):
             st.subheader(":material/map: Action Plans")
             if filtered_action_plans:
                 for plan in filtered_action_plans:
-                    st.markdown(f"**{plan.get('title', '')}**  \n{plan.get('description', '')}")
-                    created_at = plan.get('created_at', '')
-                    if hasattr(created_at, 'strftime'):
-                        created_at = created_at.strftime('%d/%m/%Y')
-                    st.caption(f"Criado em: {created_at}")
-                    for sub in plan.get('subplans', []):
-                        sub_title = sub.get('title', '')
-                        sub_reason = sub.get('reason', '')
-                        start = sub.get('start_date', '')
-                        end = sub.get('end_date', '')
-                        responsible = sub.get('responsible', '')
-                        if hasattr(start, 'strftime'):
-                            start = start.strftime('%d/%m')
-                        if hasattr(end, 'strftime'):
-                            end = end.strftime('%d/%m')
-                        with st.expander(f"### {sub_title} ({start} - {end})"):
-                            st.markdown(f"#### {sub_reason}")
+                    with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
+                        created_at = plan.get('created_at', '')
+                        if hasattr(created_at, 'strftime'):
+                            created_at = created_at.strftime('%d/%m/%Y')
+                        st.caption(f"Criado em: {created_at}")
+                        subplans = plan.get('subplans', [])
+                        for idx, sub in enumerate(subplans):
+                            if idx > 0:
+                                st.divider()
+                            sub_title = sub.get('title', '')
+                            sub_reason = sub.get('reason', '')
+                            start = sub.get('start_date', '')
+                            end = sub.get('end_date', '')
+                            responsible = sub.get('responsible', '')
+                            if hasattr(start, 'strftime'):
+                                start = start.strftime('%d/%m')
+                            if hasattr(end, 'strftime'):
+                                end = end.strftime('%d/%m')
+                            st.markdown(f"#### {sub_title} ({start} - {end})")
+                            st.markdown(f"{sub_reason}")
                             # Exibir cada etapa como título e tabela
                             actions = sub.get('actions', [])
                             if actions:
-                                for idx, a in enumerate(actions, 1):
+                                for idx2, a in enumerate(actions, 1):
                                     step_title = a.get('title', '')
                                     responsible = a.get('responsible', '')
                                     due_date = a.get('due_date', '')
                                     if hasattr(due_date, 'strftime'):
                                         due_date = due_date.strftime('%m/%d')
                                     status = a.get('status', '')
-                                    st.markdown(f"##### {idx}- {step_title}")
+                                    st.markdown(f"##### {idx2}- {step_title}")
                                     step_df = pd.DataFrame([
                                         {
                                             'Responsible': responsible,
