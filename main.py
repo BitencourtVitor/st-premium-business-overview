@@ -6,12 +6,6 @@ from pathlib import Path
 import streamlit as st
 from database.mongodb_utils import get_collection_data
 
-try:
-    users = get_collection_data("users")
-    st.write("Usuários encontrados:", users)
-except Exception as e:
-    st.write("Erro ao acessar MongoDB:", e)
-
 # Configuração da página
 FAVICON = "assets/premium_favicon.png"
 LOGO = "assets/premium_logo.png"
@@ -21,6 +15,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
     page_icon=FAVICON
 )
+
+try:
+    users = get_collection_data("users")
+except Exception as e:
+    st.write("Erro ao acessar MongoDB:", e)
 
 # Logging
 logging.basicConfig(level=logging.INFO)
