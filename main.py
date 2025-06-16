@@ -3,7 +3,15 @@ import json
 import logging
 import traceback
 from pathlib import Path
+import streamlit as st
+from database.mongodb_utils import get_collection_data
 
+try:
+    users = get_collection_data("users")
+    st.write("Usuários encontrados:", users)
+except Exception as e:
+    st.write("Erro ao acessar MongoDB:", e)
+    
 # Configuração da página
 FAVICON = "assets/premium_favicon.png"
 LOGO = "assets/premium_logo.png"
