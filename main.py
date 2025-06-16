@@ -11,7 +11,7 @@ try:
     st.write("Usuários encontrados:", users)
 except Exception as e:
     st.write("Erro ao acessar MongoDB:", e)
-    
+
 # Configuração da página
 FAVICON = "assets/premium_favicon.png"
 LOGO = "assets/premium_logo.png"
@@ -45,7 +45,7 @@ def get_collection_data(collection_name):
     try:
         from pymongo import MongoClient
         uri = get_mongo_uri()
-        client = MongoClient(uri)
+        client = MongoClient(uri, tls=True, tlsAllowInvalidCertificates=False)
         db = client[st.secrets["mongodb"]["database"]]
         collection = db[collection_name]
         data = list(collection.find({}, {"_id": 0}))
