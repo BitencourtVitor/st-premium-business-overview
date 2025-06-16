@@ -289,7 +289,7 @@ def show_screen(user_data):
                 for opp in filtered_opportunities:
                     st.markdown(f"**{opp.get('month', '')}/{opp.get('year', '')}**")
                     for o in opp.get('opportunity_list', []):
-                        with st.expander(f"Oportunidade {o.get('id', '')}"):
+                        with st.expander(f"{o.get('title', '')}"):
                             st.markdown("**Desafios:**")
                             for c in o.get('challenges', []):
                                 st.markdown(f"- ⚠️ {c}")
