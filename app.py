@@ -3,6 +3,8 @@ import json
 import logging
 import traceback
 from pathlib import Path
+from pymongo import MongoClient
+from urllib.parse import quote_plus
 
 # Page config - DEVE SER A PRIMEIRA CHAMADA STREAMLIT
 FAVICON = "assets/premium_favicon.png"
@@ -27,17 +29,36 @@ if 'user' not in st.session_state:
     st.session_state['user_data'] = None
     st.session_state['authenticated'] = False
 
-# Load authorized users
-try:
-    with open("utils/authorized_users.json", "r", encoding='utf-8') as file:
-        authorized_users = json.load(file).get("users", [])
-except Exception as e:
-    logger.error(f"Error loading authorized users: {e}")
-    authorized_users = []
-    st.error("Error loading authorized users.")
+# --- Função para obter a URI do MongoDB via st.secrets ---
+def get_mongo_uri():
+    username = st.secrets["mongodb"]["username"]
+    password = st.secrets["mongodb"]["password"]
+    cluster = st.secrets["mongodb"]["cluster"]
+    uri = f"mongodb+srv://{username}:{password}@{cluster}/?retryWrites=true&w=majority&appName=BusinessOperationsReview"
+    return uri
+# --------------------------------------------------------
 
+# Função para buscar dados de qualquer collection do MongoDB
+def get_collection_data(collection_name):
+    try:
+        uri = get_mongo_uri()
+        client = MongoClient(uri)
+        db = client[st.secrets["mongodb"]["database"]]
+        collection = db[collection_name]
+        data = list(collection.find({}, {"_id": 0}))
+        return data
+    except Exception as e:
+        logger.error(f"Error loading data from MongoDB collection '{collection_name}': {e}")
+        st.error(f"Error loading data from collection '{collection_name}'.")
+        return []
+
+# Função para buscar usuários autorizados (collection 'users')
+def get_authorized_users():
+    return get_collection_data("users")
+
+# login_user usando a collection 'users'
 def login_user(email: str, password: str) -> bool:
-    """Authenticate user and set session state"""
+    authorized_users = get_authorized_users()
     user = next((u for u in authorized_users if u["login"] == email and u["password"] == password), None)
     if user:
         st.session_state['user'] = email
@@ -58,7 +79,7 @@ def show_login():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.header("Business Operations Review", divider="blue")
+        st.header("Business Operations Review | Login", divider="blue")
         with st.container(border=True):
             st.header("Login")
             st.write("Please enter your corporate email to access the platform.")
@@ -182,3 +203,6 @@ if not st.session_state['authenticated']:
 else:
     show_header()
     show_main_content()
+    # TESTE: Mostra todos os usuários da collection 'users' após login
+    st.info("Usuários cadastrados na collection 'users':")
+    st.write(get_authorized_users())

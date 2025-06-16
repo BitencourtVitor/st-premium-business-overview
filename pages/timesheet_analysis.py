@@ -9,6 +9,11 @@ from utils.modal_admin_timesheet_analysis import modal
 
 logger = logging.getLogger(__name__)
 
+# Proteção de acesso: só usuários autenticados
+if not st.session_state.get('authenticated', False):
+    st.warning("Você precisa estar autenticado para acessar esta página.")
+    st.stop()
+
 def initialize_session_state():
     """Initialize session state variables for timesheet analysis"""
     if 'start_date' not in st.session_state:
