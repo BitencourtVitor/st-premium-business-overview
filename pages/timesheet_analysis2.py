@@ -43,7 +43,7 @@ def show_screen(user_data):
         st.session_state.errors_multiselect_timesheet_analysis2 = []  # Começa vazio
 
     # Layout principal
-    col_filtros, col_dados, col_vazia = st.columns([10,25,15], gap="small")
+    col_filtros, col_dados, col_vazia = st.columns([7.5,27.5,15], gap="small")
     
     with col_filtros:
         with st.container(border=True):
@@ -142,54 +142,54 @@ def show_screen(user_data):
                     key="selected_month_timesheet_analysis2"
                 )
 
-            # Gráfico de linha (mostra apenas os meses filtrados)
-            chart_data = filtered_month.groupby("month").agg({
-                "add_value_t1": "sum",
-                "remove_value_t1": "sum"
-            }).reset_index()
-            chart_data = chart_data.sort_values("month")
-            # Adicionar coluna de nome do Month para tooltip
-            months_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-            chart_data["month_name"] = chart_data["month"].apply(lambda x: months_labels[x-1] if 1 <= x <= 12 else str(x))
-            # Adicionar coluna de contagem de erros (linhas)
-            chart_data["error_count"] = filtered_month.groupby("month")["team_t1"].count().reindex(chart_data["month"]).values
-
-            # Transformar chart_data para formato long
-            chart_data_long = pd.melt(
-                chart_data,
-                id_vars=["month", "month_name", "error_count"],
-                value_vars=["add_value_t1", "remove_value_t1"],
-                var_name="Type",
-                value_name="Value"
-            )
-            chart_data_long["Type"] = chart_data_long["Type"].map({
-                "add_value_t1": "Added Value",
-                "remove_value_t1": "Removed Value"
-            })
-
-            base = alt.Chart(chart_data_long).encode(
-                x=alt.X('month:O', axis=alt.Axis(title='Month', values=list(range(1,13)), labelExpr='datum.value')),
-                color=alt.Color('Type:N', scale=alt.Scale(domain=["Added Value", "Removed Value"], range=["#0068c9", "#ff4b4b"]), legend=alt.Legend(title="Type"))
-            )
-            line = base.mark_line().encode(
-                y=alt.Y('Value:Q', axis=alt.Axis(title='Value'))
-            )
-            points = base.mark_point(filled=True, size=80).encode(
-                y='Value:Q',
-                tooltip=[
-                    alt.Tooltip('month:O', title='Month'),
-                    alt.Tooltip('Type:N', title='Type'),
-                    alt.Tooltip('Value:Q', title='Value', format=",.2f"),
-                    alt.Tooltip('error_count:Q', title='Error Count')
-                ]
-            )
-            chart = alt.layer(line, points)
-            chart = chart.configure_legend(
-                orient='top',
-                title=None,
-                labelFontSize=12
-            )
-            st.altair_chart(chart, use_container_width=True)
+            # NOVO GRÁFICO DE CONTAGEM
+            if st.session_state['selected_month_timesheet_analysis2'] == 0:
+                # Complete Year: contagem por mês
+                chart_data = filtered_year.groupby("month").size().reset_index(name="event_count")
+                chart_data = chart_data.sort_values("month")
+                months_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                chart_data["month_name"] = chart_data["month"].apply(lambda x: months_labels[x-1] if 1 <= x <= 12 else str(x))
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('month:O', axis=alt.Axis(title='Month', values=list(range(1,13)), labelExpr='datum.value')),
+                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Event Count'))
+                )
+                line = base.mark_line(color="#0068c9")
+                points = base.mark_point(filled=True, size=80, color="#0068c9").encode(
+                    tooltip=[
+                        alt.Tooltip('month:O', title='Month'),
+                        alt.Tooltip('event_count:Q', title='Event Count')
+                    ]
+                )
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(
+                    orient='top',
+                    title=None,
+                    labelFontSize=12
+                )
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                # Mês específico: contagem por dia
+                chart_data = filtered_month.groupby(filtered_month["date_t1"].dt.day).size().reset_index(name="event_count")
+                chart_data = chart_data.rename(columns={"date_t1": "day"})
+                chart_data = chart_data.sort_values("day")
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('day:O', axis=alt.Axis(title='Day')),
+                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Event Count'))
+                )
+                line = base.mark_line(color="#0068c9")
+                points = base.mark_point(filled=True, size=80, color="#0068c9").encode(
+                    tooltip=[
+                        alt.Tooltip('day:O', title='Day'),
+                        alt.Tooltip('event_count:Q', title='Event Count')
+                    ]
+                )
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(
+                    orient='top',
+                    title=None,
+                    labelFontSize=12
+                )
+                st.altair_chart(chart, use_container_width=True)
 
             # MÉTRICAS PERSONALIZADAS USANDO FILTERED_MONTH
             total_errors = int(filtered_month.shape[0])
@@ -221,24 +221,60 @@ def show_screen(user_data):
                 Removed_Value=("remove_value_t1", "sum")
             ).reset_index().sort_values("Count", ascending=False)
             st.dataframe(error_df, use_container_width=True, hide_index=True)
-    # Terceira coluna vazia
+
+    # Filtros de ano e mês selecionados (definir ANTES do uso na terceira coluna)
+    selected_year = st.session_state['selected_year_timesheet_analysis2']
+    selected_month = st.session_state['selected_month_timesheet_analysis2']
+
+    # Filtrar dados do MongoDB conforme ano/mês
+    if selected_month == 0:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
+    else:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
+
     with col_vazia:
         with st.container(border=True):
-            st.subheader("Action Plans")
-            # Filtros de ano e mês selecionados
-            selected_year = st.session_state['selected_year_timesheet_analysis2']
-            selected_month = st.session_state['selected_month_timesheet_analysis2']
-
-            # Filtrar dados do MongoDB conforme ano/mês
-            if selected_month == 0:
-                filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
-                filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
-                filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
+            # 1. Monthly Highlights
+            st.subheader(":material/rocket_launch: Monthly Highlights")
+            if filtered_highlights:
+                for highlight in filtered_highlights:
+                    st.markdown(f"**{highlight.get('month', '')}/{highlight.get('year', '')}**")
+                    col_pos, col_neg = st.columns(2)
+                    with col_pos:
+                        st.markdown(":material/thumb_up:  **Positivos:**")
+                        for p in highlight.get('positive', []):
+                            st.markdown(f"- {p.get('title', '')}")
+                    with col_neg:
+                        st.markdown(":material/thumb_down:  **Negativos:**")
+                        for n in highlight.get('negative', []):
+                            st.markdown(f"- {n.get('title', '')}")
             else:
-                filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
-                filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
-                filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
+                st.info("Nenhum destaque mensal encontrado.")
 
+            st.divider()
+            # 2. Opportunities
+            st.subheader(":material/emoji_objects: Opportunities")
+            if filtered_opportunities:
+                for opp in filtered_opportunities:
+                    st.markdown(f"**{opp.get('month', '')}/{opp.get('year', '')}**")
+                    for o in opp.get('opportunity_list', []):
+                        with st.expander(f"{o.get('title', '')}"):
+                            st.markdown(":material/priority_high:  **Desafios:**")
+                            for c in o.get('challenges', []):
+                                st.markdown(f"- {c}")
+                            st.markdown(":material/trending_up:  **Melhorias:**")
+                            for i in o.get('improvements', []):
+                                st.markdown(f"- {i}")
+            else:
+                st.info("Nenhuma oportunidade encontrada.")
+
+            st.divider()
+            # 3. Action Plans
+            st.subheader(":material/map: Action Plans")
             if filtered_action_plans:
                 for plan in filtered_action_plans:
                     st.markdown(f"**{plan.get('title', '')}**  \n{plan.get('description', '')}")
@@ -251,50 +287,33 @@ def show_screen(user_data):
                         sub_reason = sub.get('reason', '')
                         start = sub.get('start_date', '')
                         end = sub.get('end_date', '')
+                        responsible = sub.get('responsible', '')
                         if hasattr(start, 'strftime'):
                             start = start.strftime('%d/%m')
                         if hasattr(end, 'strftime'):
                             end = end.strftime('%d/%m')
-                        with st.expander(f"Subplano: {sub_title} ({start} - {end})"):
-                            st.markdown(f"Motivo: {sub_reason}")
-                            for action in sub.get('actions', []):
-                                status_icon = '✅' if action.get('status', '') == 'concluído' else '⏳'
-                                due = action.get('due_date', '')
-                                if hasattr(due, 'strftime'):
-                                    due = due.strftime('%d/%m')
-                                st.markdown(f"- {status_icon} **{action.get('title', '')}** (Vencimento: {due})")
+                        with st.expander(f"### {sub_title} ({start} - {end})"):
+                            st.markdown(f"#### {sub_reason}")
+                            # Exibir cada etapa como título e tabela
+                            actions = sub.get('actions', [])
+                            if actions:
+                                for idx, a in enumerate(actions, 1):
+                                    step_title = a.get('title', '')
+                                    responsible = a.get('responsible', '')
+                                    due_date = a.get('due_date', '')
+                                    if hasattr(due_date, 'strftime'):
+                                        due_date = due_date.strftime('%m/%d')
+                                    status = a.get('status', '')
+                                    st.markdown(f"##### {idx}- {step_title}")
+                                    step_df = pd.DataFrame([
+                                        {
+                                            'Responsible': responsible,
+                                            'Due Date': due_date,
+                                            'Status': status
+                                        }
+                                    ])
+                                    st.dataframe(step_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Nenhuma etapa cadastrada.")
             else:
                 st.info("Nenhum plano de ação encontrado.")
-
-            st.divider()
-            st.subheader("Monthly Highlights")
-            if filtered_highlights:
-                for highlight in filtered_highlights:
-                    st.markdown(f"**{highlight.get('month', '')}/{highlight.get('year', '')}**")
-                    col_pos, col_neg = st.columns(2)
-                    with col_pos:
-                        st.markdown("**Positivos:**")
-                        for p in highlight.get('positive', []):
-                            st.markdown(f"- 👍 {p.get('title', '')}")
-                    with col_neg:
-                        st.markdown("**Negativos:**")
-                        for n in highlight.get('negative', []):
-                            st.markdown(f"- 👎 {n.get('title', '')}")
-            else:
-                st.info("Nenhum destaque mensal encontrado.")
-
-            st.divider()
-            st.subheader("Opportunities")
-            if filtered_opportunities:
-                for opp in filtered_opportunities:
-                    st.markdown(f"**{opp.get('month', '')}/{opp.get('year', '')}**")
-                    for o in opp.get('opportunity_list', []):
-                        with st.expander(f"{o.get('title', '')}"):
-                            st.markdown("**Desafios:**")
-                            for c in o.get('challenges', []):
-                                st.markdown(f"- ⚠️ {c}")
-                            st.markdown("**Melhorias:**")
-                            for i in o.get('improvements', []):
-                                st.markdown(f"- 💡 {i}")
-            else:
-                st.info("Nenhuma oportunidade encontrada.")
