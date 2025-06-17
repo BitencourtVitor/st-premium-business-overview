@@ -5,19 +5,19 @@ import traceback
 from pathlib import Path
 from pymongo import MongoClient
 from urllib.parse import quote_plus
+import importlib.util
 
 # Page config - DEVE SER A PRIMEIRA CHAMADA STREAMLIT
 FAVICON = "assets/premium_favicon.png"
 LOGO = "assets/premium_logo.png"
 st.set_page_config(
     layout="wide",
-    page_title="Business Overview",
+    page_title="Business Operations Review",
     page_icon=FAVICON,
     initial_sidebar_state="collapsed"
 )
 
-from utils.modal_admin_timesheet_analysis import modal
-from utils.user_change_data import user_change_data_modal
+from utils.modal_timesheet_analysis import show_manage_modal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +34,8 @@ def get_mongo_uri():
     username = st.secrets["mongodb"]["username"]
     password = st.secrets["mongodb"]["password"]
     cluster = st.secrets["mongodb"]["cluster"]
-    uri = f"mongodb+srv://{username}:{password}@{cluster}/?retryWrites=true&w=majority&appName=BusinessOperationsReview"
+    password_escaped = quote_plus(password)
+    uri = f"mongodb+srv://{username}:{password_escaped}@{cluster}/?retryWrites=true&w=majority&appName=BusinessOperationsReview"
     return uri
 # --------------------------------------------------------
 
@@ -42,14 +43,14 @@ def get_mongo_uri():
 def get_collection_data(collection_name):
     try:
         uri = get_mongo_uri()
-        client = MongoClient(uri)
+        client = MongoClient(uri, tls=True, tlsAllowInvalidCertificates=False)
         db = client[st.secrets["mongodb"]["database"]]
         collection = db[collection_name]
         data = list(collection.find({}, {"_id": 0}))
         return data
     except Exception as e:
-        logger.error(f"Error loading data from MongoDB collection '{collection_name}': {e}")
-        st.error(f"Error loading data from collection '{collection_name}'.")
+        logger.error(f"Erro ao carregar dados da coleção '{collection_name}': {e}")
+        st.error(f"Erro ao carregar dados da coleção '{collection_name}'.")
         return []
 
 # Função para buscar usuários autorizados (collection 'users')
@@ -79,34 +80,32 @@ def show_login():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.header("Business Operations Review | Login", divider="blue")
+        st.header("Business Operations Review", divider="blue")
         with st.container(border=True):
             st.header("Login")
-            st.write("Please enter your corporate email to access the platform.")
-            email = st.text_input("Email", key="email", placeholder="Enter your email")
-            password = st.text_input("Password", key="password", placeholder="Insert your password", type="password")
-            if st.button("Enter", key="enter_button"):
-                if login_user(email, password):
+            st.write("Acesse com seu e-mail corporativo.")
+            email = st.text_input("Email", key="email", placeholder="Digite seu e-mail")
+            senha = st.text_input("Senha", key="senha", placeholder="Digite sua senha", type="password")
+            if st.button("Entrar", key="entrar_button"):
+                if login_user(email, senha):
                     st.rerun()
                 else:
-                    st.error("Login not authorized.")
+                    st.error("Login não autorizado.")
     with col2:
         st.empty()
 
 def show_header():
     """Display header with logo and user info"""
     st.logo(LOGO)
-    col1, col2, col3 = st.columns([2.5, 0.1, 0.1])
+    col1, col2 = st.columns([2.5, 0.1])
 
     with col1:
-        st.subheader("Business Operations Review | Welcome, " + st.session_state['user_data']['name'])
+        st.header("Business Operations Review", divider="blue")
+        st.markdown(f"*What matters isn't the company's mistakes, but how it responds to them.*")
+        st.caption(st.session_state['user_data']['name'])
     with col2:
         if st.session_state['user_data']:
-            if st.button(":material/settings:", help="Edit profile", type='secondary', disabled=True):
-                user_change_data_modal()
-    with col3:
-        if st.session_state['user_data']:
-            if st.button(":material/logout:", help="Click to logout", type='secondary'):
+            if st.button(":material/logout:", help="Clique para sair", type='secondary'):
                 logout_user()
                 st.rerun()
 
@@ -152,49 +151,55 @@ def show_main_content():
 
     # Load available screens from JSON
     try:
-        with open("utils/available_screens.json", "r", encoding='utf-8') as file:
-            available_screens_data = json.load(file)
-            # Create mapping only for title->description
-            screen_mapping = {screen['title']: screen['description'] for screen in available_screens_data['screens']}
+        available_screens_data = get_collection_data("screens")
+        # Create mapping only for title->description
+        screen_mapping = {screen['title']: screen.get('description', screen['title']) for screen in available_screens_data}
     except Exception as e:
-        logger.error(f"Error loading available screens: {e}")
-        st.error("Error loading available screens configuration.")
+        logger.error(f"Erro ao carregar telas disponíveis do banco: {e}")
+        st.error("Erro ao carregar configuração de telas disponíveis.")
         return
 
     # Get available screens for user
     user_screens = user_data.get('screens', [])
     if not user_screens:
-        st.warning("No screens available for your role.")
+        st.warning("Nenhuma tela disponível para seu perfil.")
         return
 
+    # screens = ... (lista vinda do banco)
+    valid_screens = []
+    for screen in user_screens:
+        module_path = f"pages.{screen}"
+        if importlib.util.find_spec(module_path):
+            valid_screens.append(screen)
+
     # Create tabs for available screens using descriptions from JSON
-    tab_titles = [screen_mapping.get(screen, screen) for screen in user_screens]
+    tab_titles = [screen_mapping.get(screen, screen) for screen in valid_screens]
     tabs = st.tabs(tab_titles)
     
     # Load and display each screen's content
-    for tab, screen in zip(tabs, user_screens):
+    for tab, screen in zip(tabs, valid_screens):
         with tab:
             try:
                 # The screen title is now the same as the module name
                 module_name = screen
-                logger.info(f"Attempting to load module: pages.{module_name}")
+                logger.info(f"Tentando carregar módulo: pages.{module_name}")
                 
                 # Check if module file exists
                 module_path = Path(f"pages/{module_name}.py")
                 if not module_path.exists():
-                    raise FileNotFoundError(f"Module file not found: {module_path}")
+                    raise FileNotFoundError(f"Arquivo do módulo não encontrado: {module_path}")
                 
                 # Dynamically import the screen module
                 module = __import__(f"pages.{module_name}", fromlist=['show_screen'])
                 if not hasattr(module, 'show_screen'):
-                    raise AttributeError(f"Module {module_name} does not have show_screen function")
+                    raise AttributeError(f"Módulo {module_name} não possui função show_screen")
                 
                 module.show_screen(user_data)
             except Exception as e:
                 error_details = traceback.format_exc()
-                logger.error(f"Error loading {screen} module: {str(e)}\n{error_details}")
-                st.error(f"Error loading {screen} module: {str(e)}")
-                if st.checkbox("Show error details"):
+                logger.error(f"Erro ao carregar módulo {screen}: {str(e)}\n{error_details}")
+                st.error(f"Erro ao carregar módulo {screen}: {str(e)}")
+                if st.checkbox("Mostrar detalhes do erro", key=f"show_error_details_{screen}"):
                     st.code(error_details)
 
 # Main application flow
@@ -203,6 +208,3 @@ if not st.session_state['authenticated']:
 else:
     show_header()
     show_main_content()
-    # TESTE: Mostra todos os usuários da collection 'users' após login
-    st.info("Usuários cadastrados na collection 'users':")
-    st.write(get_authorized_users())
