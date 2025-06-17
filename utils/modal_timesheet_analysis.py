@@ -5,6 +5,7 @@ from database.database_timesheet_analysis import load_data, sync_and_reload, add
 from utils.st_custom import st_custom_table
 import json
 import os
+from database.mongodb_utils import get_collection_data, insert_document, update_document, delete_document
 
 # Copiado de modal_admin_timesheet_analysis.py
 # TODO: Adicionar tabs para Monthly Highlights, Opportunities e Action Plans
@@ -188,7 +189,8 @@ def modal():
     initialize_modal_session_state()
     df_t1, df_t2 = load_data()
     st.write("Choose a tab to manage.")
-    Registers, Users = st.tabs(["Registers", "Users"])  # TODO: Adicionar novas abas para Highlights, Opportunities, Action Plans
+    tab_names = ["Registers", "Users", "Monthly Highlights", "Opportunities", "Action Plans"]
+    Registers, Users, Highlights, Opportunities, ActionPlans = st.tabs(tab_names)
 
     with Registers:
         with st.expander("Add a new Register", expanded=False):
@@ -351,4 +353,81 @@ def modal():
             with col2:
                 if st.button(":material/sync:", key="sync_register", help="Click to refresh", type='secondary'):
                     df_t1, df_t2 = sync_and_reload()
-            st.dataframe(df_t2.dropna().sort_values(by=df_t2.columns[0]), use_container_width=True, hide_index=True) 
+            st.dataframe(df_t2.dropna().sort_values(by=df_t2.columns[0]), use_container_width=True, hide_index=True)
+    with Highlights:
+        st.subheader("Monthly Highlights CRUD")
+        # Seleção de ano/mês
+        col1, col2 = st.columns(2)
+        with col1:
+            year = st.number_input("Year", min_value=2000, max_value=2100, value=datetime.now().year, step=1, key="highlight_year")
+        with col2:
+            month = st.number_input("Month", min_value=1, max_value=12, value=datetime.now().month, step=1, key="highlight_month")
+        # Listar highlights existentes
+        highlights = get_collection_data('monthly_highlights')
+        filtered = [h for h in highlights if h.get('year') == year and h.get('month') == month]
+        st.write("## Highlights for selected month/year")
+        for idx, h in enumerate(filtered):
+            with st.expander(f"Highlight {idx+1}"):
+                st.json(h)
+                col_edit, col_delete = st.columns(2)
+                with col_edit:
+                    if st.button(f"Edit", key=f"edit_highlight_{idx}"):
+                        st.info("TODO: Edit form here")
+                with col_delete:
+                    if st.button(f"Delete", key=f"delete_highlight_{idx}"):
+                        if delete_document('monthly_highlights', {'year': year, 'month': month, 'positive': h.get('positive'), 'negative': h.get('negative')}):
+                            st.success("Deleted!")
+        st.divider()
+        st.write("## Add new Highlight")
+        if st.button("Add Highlight", key="add_highlight_btn"):
+            st.info("TODO: Add form here")
+    with Opportunities:
+        st.subheader("Opportunities CRUD")
+        col1, col2 = st.columns(2)
+        with col1:
+            year = st.number_input("Year", min_value=2000, max_value=2100, value=datetime.now().year, step=1, key="opp_year")
+        with col2:
+            month = st.number_input("Month", min_value=1, max_value=12, value=datetime.now().month, step=1, key="opp_month")
+        opportunities = get_collection_data('monthly_opportunities')
+        filtered = [o for o in opportunities if o.get('year') == year and o.get('month') == month]
+        st.write("## Opportunities for selected month/year")
+        for idx, o in enumerate(filtered):
+            with st.expander(f"Opportunity {idx+1}"):
+                st.json(o)
+                col_edit, col_delete = st.columns(2)
+                with col_edit:
+                    if st.button(f"Edit", key=f"edit_opp_{idx}"):
+                        st.info("TODO: Edit form here")
+                with col_delete:
+                    if st.button(f"Delete", key=f"delete_opp_{idx}"):
+                        if delete_document('monthly_opportunities', {'year': year, 'month': month, 'opportunity_list': o.get('opportunity_list')}):
+                            st.success("Deleted!")
+        st.divider()
+        st.write("## Add new Opportunity")
+        if st.button("Add Opportunity", key="add_opp_btn"):
+            st.info("TODO: Add form here")
+    with ActionPlans:
+        st.subheader("Action Plans CRUD")
+        col1, col2 = st.columns(2)
+        with col1:
+            year = st.number_input("Year", min_value=2000, max_value=2100, value=datetime.now().year, step=1, key="plan_year")
+        with col2:
+            month = st.number_input("Month", min_value=1, max_value=12, value=datetime.now().month, step=1, key="plan_month")
+        plans = get_collection_data('action_plans')
+        filtered = [p for p in plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == year and p['created_at'].month == month]
+        st.write("## Action Plans for selected month/year")
+        for idx, p in enumerate(filtered):
+            with st.expander(f"Action Plan {idx+1}"):
+                st.json(p)
+                col_edit, col_delete = st.columns(2)
+                with col_edit:
+                    if st.button(f"Edit", key=f"edit_plan_{idx}"):
+                        st.info("TODO: Edit form here")
+                with col_delete:
+                    if st.button(f"Delete", key=f"delete_plan_{idx}"):
+                        if delete_document('action_plans', {'title': p.get('title'), 'created_at': p.get('created_at')}):
+                            st.success("Deleted!")
+        st.divider()
+        st.write("## Add new Action Plan")
+        if st.button("Add Action Plan", key="add_plan_btn"):
+            st.info("TODO: Add form here") 
