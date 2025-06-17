@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 from database.database_timesheet_analysis import *
 from utils.st_custom import *
-from utils.modal_admin_timesheet_analysis import modal
+from utils.modal_timesheet_analysis import show_manage_modal
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def show_screen(user_data):
                 st.session_state['show_manage_modal'] = True
     # Chamar o modal no fluxo principal
     if st.session_state.get('show_manage_modal', False):
-        modal()
+        show_manage_modal()
 
     with refresh:
         if st.button(":material/sync:", key="refresh_button", help="Click to refresh", type='secondary'):

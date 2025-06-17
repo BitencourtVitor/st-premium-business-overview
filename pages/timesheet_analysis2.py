@@ -150,7 +150,7 @@ def show_screen(user_data):
                 if st.button(":material/database: Manage Data", key="manage_data_btn", type="secondary"):
                     st.session_state['show_manage_modal'] = True
             if st.session_state.get('show_manage_modal', False):
-                modal_timesheet_analysis.modal()
+                modal_timesheet_analysis.show_manage_modal()
             # Controles de Year e Month na mesma linha (acima do gráfico)
             col_year, col_month = st.columns([1, 3])
             with col_year:
@@ -269,11 +269,17 @@ def show_screen(user_data):
                             with col_pos:
                                 st.markdown(":material/thumb_up:  **Positives:**")
                                 for p in highlight.get('positive', []):
-                                    st.markdown(f"- {p.get('title', '')}")
+                                    if p.get('title', '').startswith('**'):
+                                        st.markdown(f":blue[:material/star: {p.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":blue[:material/fiber_manual_record:] {p.get('title', '')}")
                             with col_neg:
                                 st.markdown(":material/thumb_down:  **Negatives:**")
                                 for n in highlight.get('negative', []):
-                                    st.markdown(f"- {n.get('title', '')}")
+                                    if n.get('title', '').startswith('**'):
+                                        st.markdown(f":red[:material/star: {n.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":red[:material/fiber_manual_record:] {n.get('title', '')}")
             else:
                 st.info("Nenhum destaque mensal encontrado.")
 
