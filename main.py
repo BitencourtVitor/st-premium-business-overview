@@ -99,6 +99,7 @@ def show_header():
     col1, col2 = st.columns([2.5, 0.1])
     with col1:
         st.header("Business Operations Review", divider="blue")
+        st.markdown(f"*What matters isn’t the company’s mistakes, but how it responds to them.*")
         st.caption(st.session_state['user_data']['name'])
     with col2:
         if st.session_state['user_data']:

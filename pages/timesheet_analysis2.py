@@ -287,7 +287,7 @@ def show_screen(user_data):
                         for idx, o in enumerate(opp_blocks):
                             if idx > 0:
                                 st.divider()
-                            st.markdown(f"#### {o.get('title', '')}")
+                            st.markdown(f"##### {o.get('title', '')}")
                             st.markdown(":material/priority_high:  **Desafios:**")
                             for c in o.get('challenges', []):
                                 st.markdown(f"- {c}")
@@ -320,7 +320,7 @@ def show_screen(user_data):
                                 start = start.strftime('%d/%m')
                             if hasattr(end, 'strftime'):
                                 end = end.strftime('%d/%m')
-                            st.markdown(f"#### {sub_title} ({start} - {end})")
+                            st.markdown(f"##### {sub_title} ({start} - {end})")
                             st.markdown(f"{sub_reason}")
                             # Exibir cada etapa como título e tabela
                             actions = sub.get('actions', [])
@@ -332,7 +332,7 @@ def show_screen(user_data):
                                     if hasattr(due_date, 'strftime'):
                                         due_date = due_date.strftime('%m/%d')
                                     status = a.get('status', '')
-                                    st.markdown(f"##### {idx2}- {step_title}")
+                                    st.markdown(f"###### {idx2}- {step_title}")
                                     step_df = pd.DataFrame([
                                         {
                                             'Responsible': responsible,
