@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from database.database_timesheet_analysis import *
 from database.mongodb_utils import get_collection_data
+import utils.modal_timesheet_analysis as modal_timesheet_analysis
 
 # Proteção de acesso: só usuários autenticados
 if not st.session_state.get('authenticated', False):
@@ -140,7 +141,16 @@ def show_screen(user_data):
     col_dados, col_lateral = st.columns([7, 3], gap="small")
     with col_dados:
         with st.container(border=True):
-            st.subheader(":material/calendar_month: Analysis by Month")
+            col_header, col_empty, col_btn = st.columns([2, 2, 1], vertical_alignment="center")
+            with col_header:
+                st.header(":material/calendar_month: Analysis by Month")
+            with col_empty:
+                st.empty()
+            with col_btn:
+                if st.button(":material/database: Manage Data", key="manage_data_btn", type="secondary"):
+                    st.session_state['show_manage_modal'] = True
+            if st.session_state.get('show_manage_modal', False):
+                modal_timesheet_analysis.modal()
             # Controles de Year e Month na mesma linha (acima do gráfico)
             col_year, col_month = st.columns([1, 3])
             with col_year:
@@ -257,11 +267,11 @@ def show_screen(user_data):
                         for highlight in highlights_list:
                             col_pos, col_neg = st.columns(2)
                             with col_pos:
-                                st.markdown(":material/thumb_up:  **Positivos:**")
+                                st.markdown(":material/thumb_up:  **Positives:**")
                                 for p in highlight.get('positive', []):
                                     st.markdown(f"- {p.get('title', '')}")
                             with col_neg:
-                                st.markdown(":material/thumb_down:  **Negativos:**")
+                                st.markdown(":material/thumb_down:  **Negatives:**")
                                 for n in highlight.get('negative', []):
                                     st.markdown(f"- {n.get('title', '')}")
             else:
@@ -288,10 +298,10 @@ def show_screen(user_data):
                             if idx > 0:
                                 st.divider()
                             st.markdown(f"##### {o.get('title', '')}")
-                            st.markdown(":material/priority_high:  **Desafios:**")
+                            st.markdown(":material/priority_high:  **Challenges:**")
                             for c in o.get('challenges', []):
                                 st.markdown(f"- {c}")
-                            st.markdown(":material/trending_up:  **Melhorias:**")
+                            st.markdown(":material/trending_up:  **Improvements:**")
                             for i in o.get('improvements', []):
                                 st.markdown(f"- {i}")
             else:
@@ -306,7 +316,7 @@ def show_screen(user_data):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):
                             created_at = created_at.strftime('%d/%m/%Y')
-                        st.caption(f"Criado em: {created_at}")
+                        st.caption(f"Created at {created_at}")
                         subplans = plan.get('subplans', [])
                         for idx, sub in enumerate(subplans):
                             if idx > 0:
@@ -320,7 +330,7 @@ def show_screen(user_data):
                                 start = start.strftime('%d/%m')
                             if hasattr(end, 'strftime'):
                                 end = end.strftime('%d/%m')
-                            st.markdown(f"##### {sub_title} ({start} - {end})")
+                            st.markdown(f"##### {sub_title}")
                             st.markdown(f"{sub_reason}")
                             # Exibir cada etapa como título e tabela
                             actions = sub.get('actions', [])
