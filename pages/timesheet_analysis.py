@@ -3,8 +3,8 @@ import altair as alt
 import pandas as pd
 from datetime import datetime
 from database.database_timesheet_analysis import *
-from database.mongodb_utils import get_collection_data
-import utils.modal_timesheet_analysis as modal_timesheet_analysis
+from database.mongodb_utils import get_collection_data, get_user_name, get_collection_data_by_area
+from utils.modal import show_manage_modal
 
 # Proteção de acesso: só usuários autenticados
 if not st.session_state.get('authenticated', False):
@@ -12,10 +12,10 @@ if not st.session_state.get('authenticated', False):
     st.stop()
 
 def show_screen(user_data):
-    # Carregar dados do MongoDB
-    action_plans = get_collection_data('action_plans')
-    monthly_highlights = get_collection_data('monthly_highlights')
-    monthly_opportunities = get_collection_data('monthly_opportunities')
+    # Carregar dados do MongoDB filtrados por área 'timesheet'
+    action_plans = get_collection_data_by_area('action_plans', area_filter='timesheet')
+    monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='timesheet')
+    monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='timesheet')
 
     # Carregar dados
     df_t1, df_t2 = load_data()
@@ -70,7 +70,7 @@ def show_screen(user_data):
 
     # Filtros horizontalizados no topo
     with st.container(border=True):
-        col0, col1, col2, col3 = st.columns([1.5, 1.5, 3.5, 3.5], gap="small", vertical_alignment="center")
+        col0, col1, col2, col3 = st.columns([1.3, 1.7, 3.5, 3.5], gap="small", vertical_alignment="center")
         with col0:
             st.subheader(":material/filter_list: Filters")
         with col1:
@@ -141,16 +141,18 @@ def show_screen(user_data):
     col_dados, col_lateral = st.columns([7, 3], gap="small")
     with col_dados:
         with st.container(border=True):
-            col_header, col_empty, col_btn = st.columns([2, 2, 1], vertical_alignment="center")
+            col_header, col_empty, col_btn = st.columns([3, 1, 1], vertical_alignment="center")
             with col_header:
                 st.header(":material/calendar_month: Analysis by Month")
             with col_empty:
                 st.empty()
             with col_btn:
-                if st.button(":material/database: Manage Data", key="manage_data_btn", type="secondary"):
-                    st.session_state['show_manage_modal'] = True
-            if st.session_state.get('show_manage_modal', False):
-                modal_timesheet_analysis.show_manage_modal()
+                # Permitir acesso para usuários com role timesheet_admin
+                if "timesheet_admin" in user_data.get("roles", []):
+                    if st.button(":material/database: Manage Data", key="manage_data_btn", type="secondary"):
+                        print("DEBUG: Botão Manage Data clicado em timesheet_analysis")
+                        st.session_state['show_manage_modal'] = True
+                        st.session_state['modal_page'] = 'timesheet_analysis'
             # Controles de Year e Month na mesma linha (acima do gráfico)
             col_year, col_month = st.columns([1, 3])
             with col_year:
@@ -263,7 +265,12 @@ def show_screen(user_data):
                 highlights_by_month[key].append(h)
             if highlights_by_month:
                 for (month, year), highlights_list in sorted(highlights_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
-                    with st.expander(f"{month}/{year}"):
+                    # Buscar o nome do usuário responsável pelo primeiro highlight da lista
+                    user_name = "Usuário não encontrado"
+                    if highlights_list and 'user_id' in highlights_list[0]:
+                        user_name = get_user_name(highlights_list[0]['user_id'])
+                    
+                    with st.expander(f"{user_name} • {month}/{year}"):
                         for highlight in highlights_list:
                             col_pos, col_neg = st.columns(2)
                             with col_pos:
@@ -295,7 +302,12 @@ def show_screen(user_data):
                 opportunities_by_month[key].append(o)
             if opportunities_by_month:
                 for (month, year), opp_list in sorted(opportunities_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
-                    with st.expander(f"{month}/{year}"):
+                    # Buscar o nome do usuário responsável pela primeira opportunity da lista
+                    user_name = "Usuário não encontrado"
+                    if opp_list and 'user_id' in opp_list[0]:
+                        user_name = get_user_name(opp_list[0]['user_id'])
+                    
+                    with st.expander(f"{user_name} • {month}/{year}"):
                         opp_blocks = []
                         for opp in opp_list:
                             for o in opp.get('opportunity_list', []):

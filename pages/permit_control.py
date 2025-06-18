@@ -1,324 +1,456 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 from datetime import datetime
 import logging
 from database.database_permit_control import *
-from utils.st_custom import *
-from utils.modal_permit_control import permit_modal
+from database.mongodb_utils import get_collection_data, get_user_name, get_collection_data_by_area
+from utils.modal import show_manage_modal
 
 logger = logging.getLogger(__name__)
 
-def initialize_session_state():
-    """Initialize session state variables for permit control"""
-    if 'model_select' not in st.session_state:
-        st.session_state['model_select'] = "All"
-    if 'situation_select' not in st.session_state:
-        st.session_state['situation_select'] = "All"
-    if 'jobsites_state' not in st.session_state:
-        st.session_state.jobsites_state = {}
-    if 'select_all_jobsites' not in st.session_state:
-        st.session_state.select_all_jobsites = True
-    if 'lot_address_filter' not in st.session_state:
-        st.session_state['lot_address_filter'] = ""
-    if 'filtered_df' not in st.session_state:
-        st.session_state['filtered_df'] = None
-
-def apply_filters(df):
-    """Apply all filters to the dataframe and update session state"""
-    filtered_df = df.copy()
-
-    # Apply model filter
-    if st.session_state['model_select'] != "All":
-        filtered_df = filtered_df[filtered_df["Model"] == st.session_state['model_select']]
-
-    # Apply situation filter
-    if st.session_state['situation_select'] != "All":
-        filtered_df = filtered_df[filtered_df["Situation"] == st.session_state['situation_select']]
-
-    # Apply jobsite filter
-    if st.session_state['selected_jobsites']:
-        filtered_df = filtered_df[filtered_df["Jobsite"].isin(st.session_state['selected_jobsites'])]
-
-    # Apply lot/address text filter
-    if st.session_state['lot_address_filter']:
-        filtered_df = filtered_df[filtered_df["LOT/ADDRESS"].str.contains(
-            st.session_state['lot_address_filter'], 
-            case=False, 
-            na=False
-        )]
-
-    # Update session state with filtered dataframe
-    st.session_state['filtered_df'] = filtered_df
-    return filtered_df
-
-def calculate_permit_metrics(row):
-    """Calculate metrics for a permit record"""
-    metrics = {}
-    
-    # Convert dates to datetime if they exist
-    Request_date = pd.to_datetime(row["Request Date"], errors='coerce')
-    application_date = pd.to_datetime(row["Application Date"], errors='coerce')
-    issue_date = pd.to_datetime(row["Issue Date"], errors='coerce')
-    
-    # Calculate processing time if both Request and issue dates exist
-    if pd.notna(Request_date) and pd.notna(issue_date):
-        processing_time = (issue_date - Request_date).days
-        metrics["Processing Time"] = f"{processing_time} days"
-    else:
-        metrics["Processing Time"] = "N/A"
-    
-    # Add status indicators
-    metrics["Status"] = row["Situation"]
-    
-    # Add dates with formatting
-    metrics["Request"] = Request_date.strftime("%m/%d/%Y") if pd.notna(Request_date) else "N/A"
-    metrics["Application"] = application_date.strftime("%m/%d/%Y") if pd.notna(application_date) else "N/A"
-    metrics["Issue"] = issue_date.strftime("%m/%d/%Y") if pd.notna(issue_date) else "N/A"
-    
-    return metrics
-
-def show_permit_card(row):
-    """Display a card for a permit record"""
-    metrics = calculate_permit_metrics(row)
-    
-    with st.container(border=True):
-        # Header with Model and Jobsite
-        st.markdown(f"### {row['Model']} - {row['Jobsite']}")
-        
-        # Main content in columns
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
-        
-        with col1:
-            st.markdown("##### Location")
-            st.markdown(f"{row['LOT/ADDRESS']}")
-            if pd.notna(row["Observation"]):
-                st.markdown("##### Observation")
-                st.markdown(f"{row['Observation']}")
-        
-        with col2:
-            st.markdown("##### Timeline")
-            st.markdown(f"**Request** {metrics['Request']}")
-            st.markdown(f"**Application** {metrics['Application']}")
-            st.markdown(f"**Issue** {metrics['Issue']}")
-        
-        with col3:
-            st.markdown("##### Metrics")
-            st.markdown(f"**Status** {metrics['Status']}")
-            st.markdown(f"**Processing Time** {metrics['Processing Time']}")
-            
-        with col4:
-            if pd.notna(row["Permit File"]) and row["Permit File"].strip():
-                st.link_button(
-                    ":material/draft: See the permit",
-                    row["Permit File"],
-                    use_container_width=True,
-                    help="Click to open the permit PDF in a new tab"
-                )
-            else:
-                st.markdown("*No file available*")
+# Proteção de acesso: só usuários autenticados
+if not st.session_state.get('authenticated', False):
+    st.warning("Você precisa estar autenticado para acessar esta página.")
+    st.stop()
 
 def show_screen(user_data):
     """Main function to display the permit control screen"""
-    initialize_session_state()
+    # Carregar dados do MongoDB filtrados por área 'permit'
+    action_plans = get_collection_data_by_area('action_plans', area_filter='permit')
+    monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='permit')
+    monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='permit')
     
     # Load data
     df = load_data_permit_control()
     if df.empty:
         st.error("Error loading data. Please try again later.")
         return
+    
+    # Process data
+    df["Request Date"] = pd.to_datetime(df["Request Date"], errors="coerce")
+    df = df.dropna(subset=["Request Date"])  # Remove linhas com datas inválidas
+    df["month"] = df["Request Date"].dt.month.astype(int)
+    df["year"] = df["Request Date"].dt.year.astype(int)
+    
+    # Get unique values
+    models = sorted(df["Model"].dropna().unique())
+    situations = sorted(df["Situation"].dropna().unique())
+    jobsites = sorted(df["Jobsite"].dropna().unique())
 
-    # Header section with title, empty space, manage button, refresh button and filters
-    col_title, col_empty, col_manage, col_refresh, col_filters1, col_filters2 = st.columns([0.23, 0.01, 0.14, 0.05, 0.29, 0.28], vertical_alignment="bottom")
-    
-    with col_title:
-        st.write("## Permit Control")
-    
-    with col_empty:
-        st.empty()
-    
-    with col_manage:
-        if "permits_admin" in user_data.get("roles", []):
-            if st.button(":material/draw: Manage Database", key="manage_button_permit_control", type='secondary'):
-                st.session_state['show_permit_modal'] = True
-                st.session_state['active_tab'] = "Add Permit"
-    
-    with col_refresh:
-        if st.button(":material/sync:", key="permit_control_refresh_button", help="Click to refresh", type='secondary'):
-            df = sync_and_reload()
-    
-    with col_filters1:
-        # Get unique models and ensure they are strings, removing any whitespace
-        models = ["All"] + sorted([str(x).strip() for x in df["Model"].dropna().unique()])
-        selected_models = st.segmented_control(
-            label="Model",
-            options=models,
-            key="model_select",
-            selection_mode="multi"
-        )
-    
-    with col_filters2:
-        # Get unique situations and ensure they are strings, removing any whitespace
-        situations = ["All"] + sorted([str(x).strip() for x in df["Situation"].dropna().unique()])
-        selected_situations = st.segmented_control(
-            label="Situation",
-            options=situations,
-            key="situation_select",
-            selection_mode="multi"
-        )
+    # Initialize session state
+    if 'model_select_permit_control' not in st.session_state:
+        st.session_state.model_select_permit_control = "All"
+    if 'situation_select_permit_control' not in st.session_state:
+        st.session_state.situation_select_permit_control = "All"
+    if 'jobsites_multiselect_permit_control' not in st.session_state:
+        st.session_state.jobsites_multiselect_permit_control = []
 
-    # Lot/Address filter and date filters in columns
-    col_lot, col_date_start, col_date_end = st.columns([0.55, 0.15, 0.15], gap="large")
-    
-    with col_lot:
-        lot_address = st.text_input(
-            "Filter by Lot/Address",
-            key="lot_address_filter",
-            placeholder="Type to filter..."
+    # Inicialização dos filtros de ano e mês
+    available_years = sorted(df["year"].dropna().unique().astype(int))
+    if not available_years:
+        st.info("Nenhum dado disponível para os filtros selecionados.")
+        return
+    if 'selected_year_permit_control' not in st.session_state or st.session_state.selected_year_permit_control not in available_years:
+        current_year = datetime.now().year
+        st.session_state.selected_year_permit_control = (
+            current_year if current_year in available_years 
+            else available_years[-1] if available_years 
+            else None
         )
-    
-    with col_date_start:
-        min_date = pd.to_datetime(df["Request Date"], errors='coerce').min()
-        start_date = st.date_input(
-            "Start Date",
-            value=min_date,
-            min_value=min_date,
-            max_value=pd.to_datetime(df["Request Date"], errors='coerce').max(),
-            key="start_date_filter",
-            format="MM/DD/YYYY"
-        )
-    
-    with col_date_end:
-        max_date = pd.to_datetime(df["Request Date"], errors='coerce').max()
-        end_date = st.date_input(
-            "End Date",
-            value=max_date,
-            min_value=min_date,
-            max_value=max_date,
-            key="end_date_filter",
-            format="MM/DD/YYYY"
-        )
+    filtered_year = df[df["year"] == st.session_state['selected_year_permit_control']]
+    available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
+    if 'selected_month_permit_control' not in st.session_state or (
+        st.session_state['selected_month_permit_control'] not in available_months
+        and st.session_state['selected_month_permit_control'] != 0
+    ):
+        st.session_state['selected_month_permit_control'] = 0  # Complete Year como padrão
+    if st.session_state['selected_month_permit_control'] == 0:
+        filtered_month = filtered_year
+    else:
+        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_permit_control']]
 
-    # Jobsites filter and cards container
-    col_jobsites, col_cards = st.columns([0.2, 0.8])
+    # Filtros horizontalizados no topo
+    with st.container(border=True):
+        col0, col1, col2, col3 = st.columns([1.3, 1.7, 3.5, 3.5], gap="small", vertical_alignment="center")
+        with col0:
+            st.subheader(":material/filter_list: Filters")
+        with col1:
+            st.pills(
+                "Model",
+                options=["All"] + models,
+                key="model_select_permit_control",
+                help="Select the model"
+            )
+        with col2:
+            st.selectbox(
+                "Situation",
+                options=["All"] + situations,
+                key="situation_select_permit_control"
+            )
+        with col3:
+            st.multiselect(
+                "Jobsites",
+                options=jobsites,
+                key="jobsites_multiselect_permit_control"
+            )
+
+    # Apply filters
+    filtered = df.copy()
+    selected_model = st.session_state.model_select_permit_control
+    selected_situation = st.session_state.situation_select_permit_control
+    selected_jobsites = st.session_state.jobsites_multiselect_permit_control
     
-    with col_jobsites:
-        # Jobsites checkboxes in a bordered container
-        with st.container(border=True, height=550):
-            st.write("Jobsites")
-            # Get unique jobsites and ensure they are strings, removing any whitespace
-            jobsites = sorted([str(x).strip() for x in df["Jobsite"].dropna().unique()])
-            
-            # Initialize jobsites_state if needed
-            if not st.session_state.jobsites_state or set(st.session_state.jobsites_state.keys()) != set(jobsites):
-                st.session_state.jobsites_state = {jobsite: True for jobsite in jobsites}
-            
-            # Select All / Unselect All buttons
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("Select all", key="select_all_jobsites_btn"):
-                    for jobsite in jobsites:
-                        st.session_state.jobsites_state[jobsite] = True
-                        st.session_state[f"jobsite_{jobsite}"] = True
-                    st.session_state.select_all_jobsites = True
-            with col_btn2:
-                if st.button("Unselect all", key="unselect_all_jobsites_btn"):
-                    for jobsite in jobsites:
-                        st.session_state.jobsites_state[jobsite] = False
-                        st.session_state[f"jobsite_{jobsite}"] = False
-                    st.session_state.select_all_jobsites = False
-            
-            for jobsite in jobsites:
-                key = f"jobsite_{jobsite}"
-                checked = st.checkbox(jobsite, key=key,
-                    on_change=lambda j=jobsite: st.session_state.jobsites_state.update({j: st.session_state[f"jobsite_{j}"]}))
-                st.session_state.jobsites_state[jobsite] = checked
-            st.session_state.select_all_jobsites = all(st.session_state.jobsites_state.values())
+    if selected_model and selected_model != "All":
+        filtered = filtered[filtered["Model"] == selected_model]
+    if selected_situation and selected_situation != "All":
+        filtered = filtered[filtered["Situation"] == selected_situation]
+    if selected_jobsites:
+        filtered = filtered[filtered["Jobsite"].isin(selected_jobsites)]
     
-    with col_cards:
+    # Filtrar dados do ano selecionado para uso posterior
+    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_permit_control']]
+    available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
+
+    # Inicialização do filtro de mês
+    if 'selected_month_permit_control' not in st.session_state or (
+        st.session_state['selected_month_permit_control'] not in available_months
+        and st.session_state['selected_month_permit_control'] != 0
+    ):
+        st.session_state['selected_month_permit_control'] = 0  # Complete Year como padrão
+
+    # Filtrar dados pelo ano e mês selecionados
+    if st.session_state['selected_month_permit_control'] == 0:
+        filtered_month = filtered_year
+    else:
+        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_permit_control']]
+
+    # Definir os filtros de ano e mês selecionados
+    selected_year = st.session_state['selected_year_permit_control']
+    selected_month = st.session_state['selected_month_permit_control']
+
+    # Filtrar dados do MongoDB conforme ano/mês selecionados
+    if selected_month == 0:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
+    else:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
+
+    # Duas colunas principais para dados
+    col_dados, col_lateral = st.columns([7, 3], gap="small")
+    with col_dados:
         with st.container(border=True):
-            # Apply filters using the widget values directly
-            filtered_df = df.copy()
-
-            # Apply model filter
-            if "All" not in selected_models:
-                filtered_df = filtered_df[filtered_df["Model"].astype(str).str.strip().isin(selected_models)]
-
-            # Apply situation filter
-            if "All" not in selected_situations:
-                filtered_df = filtered_df[filtered_df["Situation"].astype(str).str.strip().isin(selected_situations)]
-
-            # Apply jobsite filter
-            selected_jobsites = [jobsite for jobsite, checked in st.session_state.jobsites_state.items() if checked]
-            if selected_jobsites:
-                filtered_df = filtered_df[filtered_df["Jobsite"].astype(str).str.strip().isin(selected_jobsites)]
-
-            # Apply lot/address text filter
-            if lot_address:
-                filtered_df = filtered_df[filtered_df["LOT/ADDRESS"].astype(str).str.strip().str.contains(
-                    lot_address, 
-                    case=False, 
-                    na=False
-                )]
-
-            # Apply date range filter
-            filtered_df['Request Date'] = pd.to_datetime(filtered_df['Request Date'], errors='coerce')
-            start_datetime = pd.to_datetime(start_date)
-            end_datetime = pd.to_datetime(end_date)
-            filtered_df = filtered_df[
-                (filtered_df['Request Date'] >= start_datetime) &
-                (filtered_df['Request Date'] <= end_datetime + pd.Timedelta(days=1))
-            ]
-
-            # Sort by Request date
-            filtered_df = filtered_df.sort_values('Request Date')
-
-            # Header with metrics
-            col_title, col_empty, col_not_applied, col_applied, col_issued = st.columns([0.20, 0.50, 0.10, 0.10, 0.10])
-            
-            with col_title:
-                st.write("#### Permit List")
-            
+            col_header, col_empty, col_btn = st.columns([3, 1, 1], vertical_alignment="center")
+            with col_header:
+                st.header(":material/calendar_month: Analysis by Month")
             with col_empty:
                 st.empty()
+            with col_btn:
+                # Permitir acesso para usuários com role permits_admin
+                if "permits_admin" in user_data.get("roles", []):
+                    if st.button(":material/database: Manage Data", key="manage_data_btn_permit_control", type="secondary"):
+                        print("DEBUG: Botão Manage Data clicado em permit_control")
+                        st.session_state['show_manage_modal'] = True
+                        st.session_state['modal_page'] = 'permit_control'
             
-            with col_not_applied:
-                not_applied_count = len(filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Not Applied"])
-                st.markdown(f"<p style='color: #ff4b4b; font-size: 1.5rem; font-weight: bold; text-align: center;'>{not_applied_count}</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color: #ff4b4b; text-align: center;'>Not Applied</p>", unsafe_allow_html=True)
+            # Controles de Year e Month na mesma linha (acima do gráfico)
+            col_year, col_month = st.columns([1, 3])
+            with col_year:
+                st.selectbox(
+                    "Year",
+                    options=available_years,
+                    key="selected_year_permit_control"
+                )
+            with col_month:
+                months_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                months_options = available_months.copy()
+                months_labels_full = [months_labels[m-1] for m in months_options]
+                months_options_with_all = [0] + months_options  # 0 será 'Complete Year'
+                months_labels_with_all = ["Complete Year"] + months_labels_full
+                st.pills(
+                    label="Month",
+                    options=months_options_with_all,
+                    format_func=lambda x: months_labels_with_all[months_options_with_all.index(x)],
+                    key="selected_month_permit_control"
+                )
             
-            with col_applied:
-                applied_count = len(filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Applied"])
-                st.markdown(f"<p style='color: orange; font-size: 1.5rem; font-weight: bold; text-align: center;'>{applied_count}</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color: orange; text-align: center;'>Applied</p>", unsafe_allow_html=True)
+            # Gráfico de contagem por situação
+            if st.session_state['selected_month_permit_control'] == 0:
+                # Gráfico anual - contagem por mês para cada situação
+                chart_data = filtered_year.groupby(["month", "Situation"]).size().reset_index(name="count")
+                chart_data = chart_data.sort_values("month")
+                months_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                chart_data["month_name"] = chart_data["month"].apply(lambda x: months_labels[x-1] if 1 <= x <= 12 else str(x))
+                
+                # Criar linhas separadas para cada situação
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('month:O', axis=alt.Axis(title='Month', values=list(range(1,13)), labelExpr='datum.value')),
+                    y=alt.Y('count:Q', axis=alt.Axis(title='Count')),
+                    color=alt.Color('Situation:N', scale=alt.Scale(
+                        domain=['Issued', 'Applied', 'Not Applied'],
+                        range=['green', 'blue', 'orange']
+                    ))
+                )
+                line = base.mark_line()
+                points = base.mark_point(filled=True, size=80).encode(
+                    tooltip=[
+                        alt.Tooltip('month:O', title='Month'),
+                        alt.Tooltip('Situation:N', title='Situation'),
+                        alt.Tooltip('count:Q', title='Count')
+                    ]
+                )
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(
+                    orient='top',
+                    title=None,
+                    labelFontSize=12
+                )
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                # Gráfico mensal - contagem por dia para cada situação
+                chart_data = filtered_month.groupby([filtered_month["Request Date"].dt.day, "Situation"]).size().reset_index(name="count")
+                chart_data = chart_data.rename(columns={"Request Date": "day"})
+                chart_data = chart_data.sort_values("day")
+                
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('day:O', axis=alt.Axis(title='Day')),
+                    y=alt.Y('count:Q', axis=alt.Axis(title='Count')),
+                    color=alt.Color('Situation:N', scale=alt.Scale(
+                        domain=['Issued', 'Applied', 'Not Applied'],
+                        range=['green', 'blue', 'orange']
+                    ))
+                )
+                line = base.mark_line()
+                points = base.mark_point(filled=True, size=80).encode(
+                    tooltip=[
+                        alt.Tooltip('day:O', title='Day'),
+                        alt.Tooltip('Situation:N', title='Situation'),
+                        alt.Tooltip('count:Q', title='Count')
+                    ]
+                )
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(
+                    orient='top',
+                    title=None,
+                    labelFontSize=12
+                )
+                st.altair_chart(chart, use_container_width=True)
+
+            # MÉTRICAS PERSONALIZADAS
+            total_permits = int(filtered_month.shape[0])
+            issued_count = int(filtered_month[filtered_month["Situation"] == "Issued"].shape[0])
+            applied_count = int(filtered_month[filtered_month["Situation"] == "Applied"].shape[0])
+            not_applied_count = int(filtered_month[filtered_month["Situation"] == "Not Applied"].shape[0])
+            
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 1], gap="small")
+            with col1:
+                st.markdown(f"<div style='color:#222;font-size:2em;font-weight:400;'>{total_permits}</div>", unsafe_allow_html=True)
+                st.caption("Total Permits")
+            with col2:
+                st.markdown(f"<div style='color:green;font-size:2em;font-weight:400;'>{issued_count}</div>", unsafe_allow_html=True)
+                st.caption("Issued")
+            with col3:
+                st.markdown(f"<div style='color:blue;font-size:2em;font-weight:400;'>{applied_count}</div>", unsafe_allow_html=True)
+                st.caption("Applied")
+            with col4:
+                st.markdown(f"<div style='color:orange;font-size:2em;font-weight:400;'>{not_applied_count}</div>", unsafe_allow_html=True)
+                st.caption("Not Applied")
+
+            # Tabelas por situação
+            st.markdown("### :material/table: Permits by Situation")
+            col_issued, col_applied, col_not_applied = st.columns(3)
             
             with col_issued:
-                issued_count = len(filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Issued"])
-                st.markdown(f"<p style='color: green; font-size: 1.5rem; font-weight: bold; text-align: center;'>{issued_count}</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color: green; text-align: center;'>Issued</p>", unsafe_allow_html=True)
-
-            # Cards container
-            with st.container(border=False, height=429):
-                # Not Applied
-                not_applied_df = filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Not Applied"]
-                if not not_applied_df.empty:
-                    st.badge("Not Applied", icon=":material/priority_high:", color="red")
-                    for _, row in not_applied_df.iterrows():
-                        show_permit_card(row)
-                
-                # Applied
-                applied_df = filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Applied"]
-                if not applied_df.empty:
-                    st.badge("Applied", icon=":material/more_horiz:", color="orange")
-                    for _, row in applied_df.iterrows():
-                        show_permit_card(row)
-                
-                # Issued
-                issued_df = filtered_df[filtered_df["Situation"].astype(str).str.strip() == "Issued"]
+                st.markdown("#### :material/check: Issued")
+                issued_df = filtered_month[filtered_month["Situation"] == "Issued"][["Model", "Jobsite", "LOT/ADDRESS", "Request Date"]]
                 if not issued_df.empty:
-                    st.badge("Issued", icon=":material/check:", color="green")
-                    for _, row in issued_df.iterrows():
-                        show_permit_card(row)
+                    st.dataframe(issued_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No issued permits")
+            
+            with col_applied:
+                st.markdown("#### :material/more_horiz: Applied")
+                applied_df = filtered_month[filtered_month["Situation"] == "Applied"][["Model", "Jobsite", "LOT/ADDRESS", "Request Date"]]
+                if not applied_df.empty:
+                    st.dataframe(applied_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No applied permits")
+            
+            with col_not_applied:
+                st.markdown("#### :material/priority_high: Not Applied")
+                not_applied_df = filtered_month[filtered_month["Situation"] == "Not Applied"][["Model", "Jobsite", "LOT/ADDRESS", "Request Date"]]
+                if not not_applied_df.empty:
+                    st.dataframe(not_applied_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No not applied permits")
 
-    # Show modal if needed
-    if st.session_state.get('show_permit_modal', False):
-        permit_modal()
+            # Container com cards dos permits
+            st.markdown("### :material/cards: Permit Details")
+            with st.container(border=True, height=400):
+                for _, row in filtered_month.iterrows():
+                    with st.container(border=True):
+                        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                        
+                        with col1:
+                            st.markdown(f"**{row['Model']} - {row['Jobsite']}**")
+                            st.markdown(f"**Location:** {row['LOT/ADDRESS']}")
+                            if pd.notna(row["Observation"]):
+                                st.markdown(f"**Observation:** {row['Observation']}")
+                        
+                        with col2:
+                            st.markdown("**Timeline**")
+                            request_date = pd.to_datetime(row["Request Date"])
+                            st.markdown(f"**Request:** {request_date.strftime('%m/%d/%Y')}")
+                            
+                            if pd.notna(row["Application Date"]):
+                                app_date = pd.to_datetime(row["Application Date"])
+                                st.markdown(f"**Application:** {app_date.strftime('%m/%d/%Y')}")
+                            
+                            if pd.notna(row["Issue Date"]):
+                                issue_date = pd.to_datetime(row["Issue Date"])
+                                st.markdown(f"**Issue:** {issue_date.strftime('%m/%d/%Y')}")
+                        
+                        with col3:
+                            st.markdown("**Status**")
+                            situation = row["Situation"]
+                            if situation == "Issued":
+                                st.markdown(f":green[{situation}]")
+                            elif situation == "Applied":
+                                st.markdown(f":blue[{situation}]")
+                            else:
+                                st.markdown(f":orange[{situation}]")
+                        
+                        with col4:
+                            if pd.notna(row["Permit File"]) and row["Permit File"].strip():
+                                st.link_button(
+                                    ":material/draft: See permit",
+                                    row["Permit File"],
+                                    use_container_width=True
+                                )
+                            else:
+                                st.markdown("*No file*")
+
+    with col_lateral:
+        with st.container(border=True):
+            # 1. Monthly Highlights
+            st.subheader(":material/rocket_launch: Monthly Highlights")
+            # Agrupar highlights por (month, year)
+            highlights_by_month = {}
+            for h in filtered_highlights:
+                key = (h.get('month', ''), h.get('year', ''))
+                if key not in highlights_by_month:
+                    highlights_by_month[key] = []
+                highlights_by_month[key].append(h)
+            if highlights_by_month:
+                for (month, year), highlights_list in sorted(highlights_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    # Buscar o nome do usuário responsável pelo primeiro highlight da lista
+                    user_name = "Usuário não encontrado"
+                    if highlights_list and 'user_id' in highlights_list[0]:
+                        user_name = get_user_name(highlights_list[0]['user_id'])
+                    
+                    with st.expander(f"{user_name} • {month}/{year}"):
+                        for highlight in highlights_list:
+                            col_pos, col_neg = st.columns(2)
+                            with col_pos:
+                                st.markdown(":material/thumb_up:  **Positives:**")
+                                for p in highlight.get('positive', []):
+                                    if p.get('title', '').startswith('**'):
+                                        st.markdown(f":blue[:material/star: {p.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":blue[:material/fiber_manual_record:] {p.get('title', '')}")
+                            with col_neg:
+                                st.markdown(":material/thumb_down:  **Negatives:**")
+                                for n in highlight.get('negative', []):
+                                    if n.get('title', '').startswith('**'):
+                                        st.markdown(f":red[:material/star: {n.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":red[:material/fiber_manual_record:] {n.get('title', '')}")
+            else:
+                st.info("Nenhum destaque mensal encontrado.")
+
+            st.divider()
+            # 2. Opportunities
+            st.subheader(":material/emoji_objects: Opportunities")
+            # Agrupar opportunities por (month, year)
+            opportunities_by_month = {}
+            for o in filtered_opportunities:
+                key = (o.get('month', ''), o.get('year', ''))
+                if key not in opportunities_by_month:
+                    opportunities_by_month[key] = []
+                opportunities_by_month[key].append(o)
+            if opportunities_by_month:
+                for (month, year), opp_list in sorted(opportunities_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    # Buscar o nome do usuário responsável pela primeira opportunity da lista
+                    user_name = "Usuário não encontrado"
+                    if opp_list and 'user_id' in opp_list[0]:
+                        user_name = get_user_name(opp_list[0]['user_id'])
+                    
+                    with st.expander(f"{user_name} • {month}/{year}"):
+                        opp_blocks = []
+                        for opp in opp_list:
+                            for o in opp.get('opportunity_list', []):
+                                opp_blocks.append(o)
+                        for idx, o in enumerate(opp_blocks):
+                            if idx > 0:
+                                st.divider()
+                            st.markdown(f"##### {o.get('title', '')}")
+                            st.markdown(":material/priority_high:  **Challenges:**")
+                            for c in o.get('challenges', []):
+                                st.markdown(f"- {c}")
+                            st.markdown(":material/trending_up:  **Improvements:**")
+                            for i in o.get('improvements', []):
+                                st.markdown(f"- {i}")
+            else:
+                st.info("Nenhuma oportunidade encontrada.")
+
+            st.divider()
+            # 3. Action Plans
+            st.subheader(":material/map: Action Plans")
+            if filtered_action_plans:
+                for plan in filtered_action_plans:
+                    with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
+                        created_at = plan.get('created_at', '')
+                        if hasattr(created_at, 'strftime'):
+                            created_at = created_at.strftime('%d/%m/%Y')
+                        st.caption(f"Created at {created_at}")
+                        subplans = plan.get('subplans', [])
+                        for idx, sub in enumerate(subplans):
+                            if idx > 0:
+                                st.divider()
+                            sub_title = sub.get('title', '')
+                            sub_reason = sub.get('reason', '')
+                            start = sub.get('start_date', '')
+                            end = sub.get('end_date', '')
+                            responsible = sub.get('responsible', '')
+                            if hasattr(start, 'strftime'):
+                                start = start.strftime('%d/%m')
+                            if hasattr(end, 'strftime'):
+                                end = end.strftime('%d/%m')
+                            st.markdown(f"##### {sub_title}")
+                            st.markdown(f"{sub_reason}")
+                            # Exibir cada etapa como título e tabela
+                            actions = sub.get('actions', [])
+                            if actions:
+                                for idx2, a in enumerate(actions, 1):
+                                    step_title = a.get('title', '')
+                                    responsible = a.get('responsible', '')
+                                    due_date = a.get('due_date', '')
+                                    if hasattr(due_date, 'strftime'):
+                                        due_date = due_date.strftime('%m/%d')
+                                    status = a.get('status', '')
+                                    st.markdown(f"###### {idx2}- {step_title}")
+                                    step_df = pd.DataFrame([
+                                        {
+                                            'Responsible': responsible,
+                                            'Due Date': due_date,
+                                            'Status': status
+                                        }
+                                    ])
+                                    st.dataframe(step_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Nenhuma etapa cadastrada.")
+            else:
+                st.info("Nenhum plano de ação encontrado.")

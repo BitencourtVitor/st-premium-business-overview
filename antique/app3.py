@@ -20,7 +20,7 @@ def get_google_drive_service():
     SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
     
     # Use service account credentials
-    credentials_path = os.path.join('utils', 'credentials2.json')
+    credentials_path = os.path.join('antique', 'credentials2.json')
     credentials = service_account.Credentials.from_service_account_file(
         credentials_path, scopes=SCOPES)
 

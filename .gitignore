@@ -4,8 +4,8 @@ __pycache__/
 *$py.class
 
 # Credentials
-utils/credentials.json
-utils/credentials2.json
+antique/credentials.json
+antique/credentials2.json
 
 # Environment
 .env
@@ -20,4 +20,4 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db utils/credentials2.json
+Thumbs.db

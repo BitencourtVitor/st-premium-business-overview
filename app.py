@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-from utils.modal_timesheet_analysis import show_manage_modal
+from utils.modal import show_manage_modal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +55,17 @@ def get_collection_data(collection_name):
 
 # Função para buscar usuários autorizados (collection 'users')
 def get_authorized_users():
-    return get_collection_data("users")
+    try:
+        uri = get_mongo_uri()
+        client = MongoClient(uri, tls=True, tlsAllowInvalidCertificates=False)
+        db = client[st.secrets["mongodb"]["database"]]
+        collection = db['users']
+        data = list(collection.find({}))  # Incluir _id
+        return data
+    except Exception as e:
+        logger.error(f"Erro ao carregar usuários: {e}")
+        st.error(f"Erro ao carregar usuários.")
+        return []
 
 # login_user usando a collection 'users'
 def login_user(email: str, password: str) -> bool:
@@ -180,6 +190,9 @@ def show_main_content():
     for tab, screen in zip(tabs, valid_screens):
         with tab:
             try:
+                # Definir a página atual no session_state para o modal saber qual role usar
+                st.session_state['current_page'] = screen
+                
                 # The screen title is now the same as the module name
                 module_name = screen
                 logger.info(f"Tentando carregar módulo: pages.{module_name}")
@@ -201,6 +214,36 @@ def show_main_content():
                 st.error(f"Erro ao carregar módulo {screen}: {str(e)}")
                 if st.checkbox("Mostrar detalhes do erro", key=f"show_error_details_{screen}"):
                     st.code(error_details)
+    
+    # Exibir o modal de gerenciamento de dados fora do loop de tabs para evitar conflitos
+    # Só abrir se o usuário clicou no botão e tem permissão
+    if st.session_state.get('show_manage_modal', False):
+        # Usar a página que foi definida quando o botão foi clicado, não a última do loop
+        modal_page = st.session_state.get('modal_page', '')
+        user_data = st.session_state.get('user_data', {})
+        
+        # Log para debug
+        print(f"DEBUG: show_manage_modal=True, modal_page={modal_page}")
+        print(f"DEBUG: user_roles={user_data.get('roles', [])}")
+        
+        # Verificar se o usuário tem permissão para a página do modal
+        has_permission = False
+        if modal_page == 'permit_control' and "permits_admin" in user_data.get("roles", []):
+            has_permission = True
+            print("DEBUG: Permissão concedida para permit_control")
+        elif modal_page == 'timesheet_analysis' and "timesheet_admin" in user_data.get("roles", []):
+            has_permission = True
+            print("DEBUG: Permissão concedida para timesheet_analysis")
+        else:
+            print(f"DEBUG: Sem permissão - modal_page={modal_page}, roles={user_data.get('roles', [])}")
+        
+        if has_permission:
+            print("DEBUG: Abrindo modal...")
+            show_manage_modal()
+        else:
+            # Resetar o flag se não tem permissão
+            print("DEBUG: Resetando flag show_manage_modal")
+            st.session_state['show_manage_modal'] = False
 
 # Main application flow
 if not st.session_state['authenticated']:

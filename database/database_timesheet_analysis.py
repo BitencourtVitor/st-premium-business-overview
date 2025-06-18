@@ -49,7 +49,7 @@ def load_data():
 
 def dataCredentials(gid):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    path = os.path.join("utils", "credentials.json")
+    path = os.path.join("antique", "credentials.json")
     creds = ServiceAccountCredentials.from_json_keyfile_name(path, scope)
     client = gspread.authorize(creds)
 
