@@ -2,7 +2,7 @@ import streamlit as st
 import altair as alt
 import pandas as pd
 from datetime import datetime
-from database.database_accounting_indicators import load_data_accounting_indicators
+from database.database_accounting_indicators import load_data_accounting_indicators, filtrar_dados_accounting
 from database.mongodb_utils import get_collection_data_by_area, get_user_name
 from utils.modal import show_manage_modal
 
@@ -12,15 +12,29 @@ if not st.session_state.get('authenticated', False):
     st.stop()
 
 def show_screen(user_data):
-    df = load_data_accounting_indicators()
-    if df.empty:
-        st.error("Erro ao carregar dados. Tente novamente mais tarde.")
+    df = st.session_state.get('accounting_indicators_data_cache')
+    if df is None:
+        st.error('Dados não carregados. Refaça o login ou recarregue a página.')
+        return
+
+    # Dados do MongoDB agora também do cache
+    action_plans = st.session_state.get('accounting_action_plans_cache')
+    monthly_highlights = st.session_state.get('accounting_monthly_highlights_cache')
+    monthly_opportunities = st.session_state.get('accounting_monthly_opportunities_cache')
+    if action_plans is None or monthly_highlights is None or monthly_opportunities is None:
+        st.error('Dados de destaques, oportunidades ou planos de ação não carregados. Refaça o login ou recarregue a página.')
         return
 
     # Conversão explícita dos tipos necessários para o gráfico funcionar
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    # Corrigir separador de milhar e converter para float
-    df["Open balance"] = df["Open balance"].str.replace(",", "").astype(float)
+    # Corrigir separador de milhar e converter para float de forma robusta
+    df["Open balance"] = (
+        df["Open balance"]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .replace("nan", None)
+        .astype(float)
+    )
 
     # Process data
     df = df.dropna(subset=["Date"])  # Remove linhas com datas inválidas
@@ -41,20 +55,12 @@ def show_screen(user_data):
         st.session_state.accounting_category_multiselect = []
 
     # Apply filters
-    filtered = df.copy()
     selected_type = st.session_state.accounting_segmented_control
     selected_aging = st.session_state.accounting_aging_pill
     selected_categories = st.session_state.accounting_category_multiselect
 
-    if selected_type == "Receivables":
-        filtered = filtered[filtered["Transaction type"] == "Invoice"]
-    if selected_aging and selected_aging != "All":
-        filtered = filtered[filtered["Aging Intervals"] == selected_aging]
-    if selected_categories:
-        filtered = filtered[filtered["Category"].isin(selected_categories)]
-
-    # Filtros de ano e mês
-    available_years = sorted(filtered["year"].dropna().unique().astype(int))
+    # Ano e mês
+    available_years = sorted(df["year"].dropna().unique().astype(int))
     if not available_years:
         st.info("Nenhum dado disponível para os filtros selecionados.")
         return
@@ -65,36 +71,25 @@ def show_screen(user_data):
             else available_years[-1] if available_years 
             else None
         )
-    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_accounting_indicators']]
+    selected_year = st.session_state['selected_year_accounting_indicators']
+    filtered_year = df[df["year"] == selected_year]
     available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
     if 'selected_month_accounting_indicators' not in st.session_state or (
         st.session_state['selected_month_accounting_indicators'] not in available_months
         and st.session_state['selected_month_accounting_indicators'] != 0
     ):
-        st.session_state['selected_month_accounting_indicators'] = 0  # Complete Year como padrão
-    if st.session_state['selected_month_accounting_indicators'] == 0:
-        filtered_month = filtered_year
-    else:
-        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_accounting_indicators']]
-
-    # Carregar dados do MongoDB filtrados por área 'accounting'
-    action_plans = get_collection_data_by_area('action_plans', area_filter='accounting')
-    monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='accounting')
-    monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='accounting')
-
-    # Definir ano/mês selecionados
-    selected_year = st.session_state['selected_year_accounting_indicators']
+        st.session_state['selected_month_accounting_indicators'] = 0
     selected_month = st.session_state['selected_month_accounting_indicators']
 
-    # Filtrar dados do MongoDB conforme ano/mês selecionados
-    if selected_month == 0:
-        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
-        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
-        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
-    else:
-        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
-        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
-        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
+    # --- USAR FUNÇÃO CACHEADA PARA FILTRAR ---
+    filtered_month = filtrar_dados_accounting(
+        df,
+        ano=selected_year,
+        mes=selected_month,
+        categorias=selected_categories,
+        tipo=selected_type,
+        aging=selected_aging
+    )
 
     # Filtros horizontalizados no topo (container sozinho, ponta a ponta)
     with st.container(border=True):
@@ -181,7 +176,7 @@ def show_screen(user_data):
                 chart_data['month_str'] = chart_data['Date'].dt.strftime('%b')
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('month_str:N', axis=alt.Axis(title='Month')),
-                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value')),
+                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value', tickMinStep=50000)),
                     color=color if color else alt.value("#0068c9")
                 )
                 points_tooltip = [alt.Tooltip('month_str:N', title='Mês'), alt.Tooltip('Open balance:Q', title='Valor')]
@@ -211,7 +206,7 @@ def show_screen(user_data):
                 chart_data['day_str'] = chart_data['Date'].dt.strftime('%d')
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('day_str:N', axis=alt.Axis(title='Day')),
-                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value')),
+                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value', tickMinStep=50000)),
                     color=color if color else alt.value("#0068c9")
                 )
                 points_tooltip = [alt.Tooltip('day_str:N', title='Day'), alt.Tooltip('Open balance:Q', title='Value')]
@@ -231,7 +226,7 @@ def show_screen(user_data):
             # 1. Monthly Highlights
             st.subheader(":material/rocket_launch: Monthly Highlights")
             highlights_by_month = {}
-            for h in filtered_highlights:
+            for h in filtered_month:
                 key = (h.get('month', ''), h.get('year', ''))
                 if key not in highlights_by_month:
                     highlights_by_month[key] = []
@@ -264,7 +259,7 @@ def show_screen(user_data):
             # 2. Opportunities
             st.subheader(":material/emoji_objects: Opportunities")
             opportunities_by_month = {}
-            for o in filtered_opportunities:
+            for o in filtered_month:
                 key = (o.get('month', ''), o.get('year', ''))
                 if key not in opportunities_by_month:
                     opportunities_by_month[key] = []
@@ -294,8 +289,8 @@ def show_screen(user_data):
             st.divider()
             # 3. Action Plans
             st.subheader(":material/map: Action Plans")
-            if filtered_action_plans:
-                for plan in filtered_action_plans:
+            if filtered_month:
+                for plan in filtered_month:
                     with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):

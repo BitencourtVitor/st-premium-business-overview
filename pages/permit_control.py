@@ -6,6 +6,7 @@ import logging
 from database.database_permit_control import *
 from database.mongodb_utils import get_collection_data, get_user_name, get_collection_data_by_area
 from utils.modal import show_manage_modal
+from database.database_permit_control import load_data_permit_control, filtrar_dados_permit
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +17,17 @@ if not st.session_state.get('authenticated', False):
 
 def show_screen(user_data):
     """Main function to display the permit control screen"""
-    # Carregar dados do MongoDB filtrados por área 'permit'
-    action_plans = get_collection_data_by_area('action_plans', area_filter='permit')
-    monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='permit')
-    monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='permit')
-    
-    # Load data
-    df = load_data_permit_control()
-    if df.empty:
-        st.error("Error loading data. Please try again later.")
+    df = st.session_state.get('permit_control_data_cache')
+    if df is None:
+        st.error('Dados não carregados. Refaça o login ou recarregue a página.')
+        return
+
+    # Dados do MongoDB agora também do cache
+    action_plans = st.session_state.get('permit_action_plans_cache')
+    monthly_highlights = st.session_state.get('permit_monthly_highlights_cache')
+    monthly_opportunities = st.session_state.get('permit_monthly_opportunities_cache')
+    if action_plans is None or monthly_highlights is None or monthly_opportunities is None:
+        st.error('Dados de destaques, oportunidades ou planos de ação não carregados. Refaça o login ou recarregue a página.')
         return
     
     # Process data
@@ -58,17 +61,15 @@ def show_screen(user_data):
             else available_years[-1] if available_years 
             else None
         )
-    filtered_year = df[df["year"] == st.session_state['selected_year_permit_control']]
+    selected_year = st.session_state['selected_year_permit_control']
+    filtered_year = df[df["year"] == selected_year]
     available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
     if 'selected_month_permit_control' not in st.session_state or (
         st.session_state['selected_month_permit_control'] not in available_months
         and st.session_state['selected_month_permit_control'] != 0
     ):
-        st.session_state['selected_month_permit_control'] = 0  # Complete Year como padrão
-    if st.session_state['selected_month_permit_control'] == 0:
-        filtered_month = filtered_year
-    else:
-        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_permit_control']]
+        st.session_state['selected_month_permit_control'] = 0
+    selected_month = st.session_state['selected_month_permit_control']
 
     # Filtros horizontalizados no topo
     with st.container(border=True):
@@ -96,34 +97,19 @@ def show_screen(user_data):
             )
 
     # Apply filters
-    filtered = df.copy()
     selected_model = st.session_state.model_select_permit_control
     selected_situation = st.session_state.situation_select_permit_control
     selected_jobsites = st.session_state.jobsites_multiselect_permit_control
     
-    if selected_model and selected_model != "All":
-        filtered = filtered[filtered["Model"] == selected_model]
-    if selected_situation and selected_situation != "All":
-        filtered = filtered[filtered["Situation"] == selected_situation]
-    if selected_jobsites:
-        filtered = filtered[filtered["Jobsite"].isin(selected_jobsites)]
-    
-    # Filtrar dados do ano selecionado para uso posterior
-    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_permit_control']]
-    available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
-
-    # Inicialização do filtro de mês
-    if 'selected_month_permit_control' not in st.session_state or (
-        st.session_state['selected_month_permit_control'] not in available_months
-        and st.session_state['selected_month_permit_control'] != 0
-    ):
-        st.session_state['selected_month_permit_control'] = 0  # Complete Year como padrão
-
-    # Filtrar dados pelo ano e mês selecionados
-    if st.session_state['selected_month_permit_control'] == 0:
-        filtered_month = filtered_year
-    else:
-        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_permit_control']]
+    # --- USAR FUNÇÃO CACHEADA PARA FILTRAR ---
+    filtered_month = filtrar_dados_permit(
+        df,
+        ano=selected_year,
+        mes=selected_month,
+        modelo=selected_model,
+        situacao=selected_situation,
+        jobsites=selected_jobsites
+    )
 
     # Definir os filtros de ano e mês selecionados
     selected_year = st.session_state['selected_year_permit_control']

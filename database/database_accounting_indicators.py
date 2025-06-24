@@ -36,4 +36,19 @@ def sync_and_reload():
 def head_accounting_indicators_public():
     """Retorna o head do DataFrame público para depuração."""
     df = load_data_accounting_indicators()
-    return df.head() 
+    return df.head()
+
+@st.cache_data
+def filtrar_dados_accounting(df, ano=None, mes=None, categorias=None, tipo=None, aging=None):
+    filtered = df.copy()
+    if tipo and tipo != 'All':
+        filtered = filtered[filtered['Transaction type'] == tipo]
+    if aging and aging != 'All':
+        filtered = filtered[filtered['Aging Intervals'] == aging]
+    if categorias:
+        filtered = filtered[filtered['Category'].isin(categorias)]
+    if ano:
+        filtered = filtered[filtered['year'] == ano]
+    if mes is not None and mes != 0:
+        filtered = filtered[filtered['month'] == mes]
+    return filtered 

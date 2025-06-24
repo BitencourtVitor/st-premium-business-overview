@@ -5,6 +5,7 @@ from datetime import datetime
 from database.database_timesheet_analysis import *
 from database.mongodb_utils import get_collection_data, get_user_name, get_collection_data_by_area
 from utils.modal import show_manage_modal
+from database.database_timesheet_analysis import load_data, filtrar_dados_timesheet
 
 # Proteção de acesso: só usuários autenticados
 if not st.session_state.get('authenticated', False):
@@ -12,17 +13,24 @@ if not st.session_state.get('authenticated', False):
     st.stop()
 
 def show_screen(user_data):
+    data = st.session_state.get('timesheet_analysis_data_cache')
+    if data is None:
+        st.error('Dados não carregados. Refaça o login ou recarregue a página.')
+        return
+    df_t1, df_t2 = data
+
+    # Dados do MongoDB agora também do cache
+    action_plans = st.session_state.get('timesheet_action_plans_cache')
+    monthly_highlights = st.session_state.get('timesheet_monthly_highlights_cache')
+    monthly_opportunities = st.session_state.get('timesheet_monthly_opportunities_cache')
+    if action_plans is None or monthly_highlights is None or monthly_opportunities is None:
+        st.error('Dados de destaques, oportunidades ou planos de ação não carregados. Refaça o login ou recarregue a página.')
+        return
     # Carregar dados do MongoDB filtrados por área 'timesheet'
     action_plans = get_collection_data_by_area('action_plans', area_filter='timesheet')
     monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='timesheet')
     monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='timesheet')
 
-    # Carregar dados
-    df_t1, df_t2 = load_data()
-    if df_t1.empty or df_t2.empty:
-        st.error("Erro ao carregar dados. Tente novamente mais tarde.")
-        return
-    
     # Process data
     df_t1.columns = df_t1.columns.str.strip()
     df_t1["date_t1"] = pd.to_datetime(df_t1["date_t1"], errors="coerce")
@@ -56,17 +64,15 @@ def show_screen(user_data):
             else available_years[-1] if available_years 
             else None
         )
-    filtered_year = df_t1[df_t1["year"] == st.session_state['selected_year_timesheet_analysis2']]
+    selected_year = st.session_state['selected_year_timesheet_analysis2']
+    filtered_year = df_t1[df_t1["year"] == selected_year]
     available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
     if 'selected_month_timesheet_analysis2' not in st.session_state or (
         st.session_state['selected_month_timesheet_analysis2'] not in available_months
         and st.session_state['selected_month_timesheet_analysis2'] != 0
     ):
         st.session_state['selected_month_timesheet_analysis2'] = 0  # Complete Year como padrão
-    if st.session_state['selected_month_timesheet_analysis2'] == 0:
-        filtered_month = filtered_year
-    else:
-        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_timesheet_analysis2']]
+    selected_month = st.session_state['selected_month_timesheet_analysis2']
 
     # Filtros horizontalizados no topo
     with st.container(border=True):
@@ -94,34 +100,15 @@ def show_screen(user_data):
             )
 
     # Apply filters
-    filtered = df_t1.copy()
     selected_corporation = st.session_state.corporation_select_timesheet_analysis2
     selected_teams = st.session_state.teams_multiselect_timesheet_analysis2
     selected_errors = st.session_state.errors_multiselect_timesheet_analysis2
     
-    if selected_corporation and selected_corporation != "All":
-        filtered = filtered[filtered["corporation_t1"] == selected_corporation]
-    if selected_teams:
-        filtered = filtered[filtered["team_t1"].isin(selected_teams)]
-    if selected_errors:
-        filtered = filtered[filtered["error_t1"].isin(selected_errors)]
-    
-    # Filtrar dados do ano selecionado para uso posterior
-    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_timesheet_analysis2']]
-    available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
-
-    # Inicialização do filtro de mês
-    if 'selected_month_timesheet_analysis2' not in st.session_state or (
-        st.session_state['selected_month_timesheet_analysis2'] not in available_months
-        and st.session_state['selected_month_timesheet_analysis2'] != 0
-    ):
-        st.session_state['selected_month_timesheet_analysis2'] = 0  # Complete Year como padrão
-
     # Filtrar dados pelo ano e mês selecionados
-    if st.session_state['selected_month_timesheet_analysis2'] == 0:
+    if selected_month == 0:
         filtered_month = filtered_year
     else:
-        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_timesheet_analysis2']]
+        filtered_month = filtered_year[filtered_year["month"] == selected_month]
 
     # Definir os filtros de ano e mês selecionados
     selected_year = st.session_state['selected_year_timesheet_analysis2']
@@ -182,13 +169,13 @@ def show_screen(user_data):
                 chart_data["month_name"] = chart_data["month"].apply(lambda x: months_labels[x-1] if 1 <= x <= 12 else str(x))
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('month:O', axis=alt.Axis(title='Month', values=list(range(1,13)), labelExpr='datum.value')),
-                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Event Count'))
+                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Error Count'))
                 )
                 line = base.mark_line(color="#0068c9")
                 points = base.mark_point(filled=True, size=80, color="#0068c9").encode(
                     tooltip=[
                         alt.Tooltip('month:O', title='Month'),
-                        alt.Tooltip('event_count:Q', title='Event Count')
+                        alt.Tooltip('event_count:Q', title='Error Count')
                     ]
                 )
                 chart = alt.layer(line, points)
@@ -204,13 +191,13 @@ def show_screen(user_data):
                 chart_data = chart_data.sort_values("day")
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('day:O', axis=alt.Axis(title='Day')),
-                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Event Count'))
+                    y=alt.Y('event_count:Q', axis=alt.Axis(title='Error Count'))
                 )
                 line = base.mark_line(color="#0068c9")
                 points = base.mark_point(filled=True, size=80, color="#0068c9").encode(
                     tooltip=[
                         alt.Tooltip('day:O', title='Day'),
-                        alt.Tooltip('event_count:Q', title='Event Count')
+                        alt.Tooltip('event_count:Q', title='Error Count')
                     ]
                 )
                 chart = alt.layer(line, points)
@@ -251,6 +238,8 @@ def show_screen(user_data):
                 Removed_Value=("remove_value_t1", "sum")
             ).reset_index().sort_values("Count", ascending=False)
             st.dataframe(error_df, use_container_width=True, hide_index=True)
+
+            st.warning("É necessário adicionar o controle de erros internos do Office para o timesheet como um novo st.dataframe.")
 
     with col_lateral:
         with st.container(border=True):

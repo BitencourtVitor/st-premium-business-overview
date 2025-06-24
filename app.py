@@ -6,6 +6,7 @@ from pathlib import Path
 from pymongo import MongoClient
 from urllib.parse import quote_plus
 import importlib.util
+from database.mongodb_utils import get_collection_data_by_area
 
 # Page config - DEVE SER A PRIMEIRA CHAMADA STREAMLIT
 FAVICON = "assets/premium_favicon.png"
@@ -248,9 +249,70 @@ def show_main_content():
             print("DEBUG: Resetando flag show_manage_modal")
             st.session_state['show_manage_modal'] = False
 
+# IMPORT LOADERS DAS TELAS GOOGLE DRIVE
+from database.database_accounting_indicators import load_data_accounting_indicators
+from database.database_timesheet_analysis import load_data as load_data_timesheet_analysis
+from database.database_permit_control import load_data_permit_control
+# ... adicione outros loaders conforme necessário
+
+# DICIONÁRIO DE LOADERS
+DATA_LOADERS = {
+    "accounting_indicators": load_data_accounting_indicators,
+    "timesheet_analysis": load_data_timesheet_analysis,
+    "permit_control": load_data_permit_control,
+    # ... adicione outras telas aqui
+}
+
+# Função para pré-carregar dados das telas permitidas com barra de progresso
+
+def preload_user_data_with_progress(user_data):
+    user_screens = user_data.get('screens', [])
+    total = len(user_screens)
+    if total == 0:
+        return
+    progress_bar = st.progress(0, text="Carregando dados das telas...")
+    for idx, screen in enumerate(user_screens):
+        loader = DATA_LOADERS.get(screen)
+        cache_key = f"{screen}_data_cache"
+        if loader and cache_key not in st.session_state:
+            try:
+                # Para timesheet_analysis, são dois DataFrames
+                if screen == "timesheet_analysis":
+                    df_t1, df_t2 = loader()
+                    st.session_state[cache_key] = (df_t1, df_t2)
+                else:
+                    st.session_state[cache_key] = loader()
+            except Exception as e:
+                st.warning(f"Erro ao carregar dados da tela {screen}: {e}")
+        # Carregar dados do MongoDB para cada tela
+        if screen == "accounting_indicators":
+            area = "accounting"
+        elif screen == "timesheet_analysis":
+            area = "timesheet"
+        elif screen == "permit_control":
+            area = "permit"
+        else:
+            area = None
+        if area:
+            # Action Plans
+            ap_key = f"{screen.split('_')[0]}_action_plans_cache"
+            if ap_key not in st.session_state:
+                st.session_state[ap_key] = get_collection_data_by_area('action_plans', area_filter=area)
+            # Monthly Highlights
+            mh_key = f"{screen.split('_')[0]}_monthly_highlights_cache"
+            if mh_key not in st.session_state:
+                st.session_state[mh_key] = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area)
+            # Monthly Opportunities
+            mo_key = f"{screen.split('_')[0]}_monthly_opportunities_cache"
+            if mo_key not in st.session_state:
+                st.session_state[mo_key] = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter=area)
+        progress_bar.progress((idx + 1) / total, text=f"Carregando dados: {screen} ({idx+1}/{total})")
+    progress_bar.empty()
+
 # Main application flow
 if not st.session_state['authenticated']:
     show_login()
 else:
     show_header()
+    preload_user_data_with_progress(st.session_state['user_data'])
     show_main_content()

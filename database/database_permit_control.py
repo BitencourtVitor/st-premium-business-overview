@@ -128,3 +128,18 @@ def delete_permit(row_data):
     except Exception as e:
         logger.error(f"Error deleting permit: {str(e)}")
         return False
+
+@st.cache_data
+def filtrar_dados_permit(df, ano=None, mes=None, modelo=None, situacao=None, jobsites=None):
+    filtered = df.copy()
+    if modelo and modelo != 'All':
+        filtered = filtered[filtered['Model'] == modelo]
+    if situacao and situacao != 'All':
+        filtered = filtered[filtered['Situation'] == situacao]
+    if jobsites:
+        filtered = filtered[filtered['Jobsite'].isin(jobsites)]
+    if ano:
+        filtered = filtered[filtered['year'] == ano]
+    if mes is not None and mes != 0:
+        filtered = filtered[filtered['month'] == mes]
+    return filtered

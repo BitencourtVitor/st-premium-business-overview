@@ -81,9 +81,12 @@ def _modal_dialog():
                     'positive': [{'title': t.strip()} for t in pos.splitlines() if t.strip()],
                     'negative': [{'title': t.strip()} for t in neg.splitlines() if t.strip()]
                 })
+                # Atualizar cache apenas após salvar
+                cache_key = f"{area_filter}_monthly_highlights_cache"
+                st.session_state[cache_key] = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)
                 st.success("Updated!")
                 st.rerun()
-            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_highlights', {'year': year, 'month': month}), st.success("Deleted!"), st.rerun()), key=f"popover_highlight")
+            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_highlights', {'year': year, 'month': month}), st.success("Deleted!"), st.session_state.update({f"{area_filter}_monthly_highlights_cache": get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)}), st.rerun()), key=f"popover_highlight")
         else:
             with st.form(key="add_highlight_form"):
                 pos_new = st.text_area("Positives (one per line)", key="add_highlight_pos")
@@ -98,6 +101,9 @@ def _modal_dialog():
                         'positive': [{'title': t.strip()} for t in pos_new.splitlines() if t.strip()],
                         'negative': [{'title': t.strip()} for t in neg_new.splitlines() if t.strip()]
                     })
+                    # Atualizar cache apenas após salvar
+                    cache_key = f"{area_filter}_monthly_highlights_cache"
+                    st.session_state[cache_key] = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)
                     st.success("Added!")
                     st.rerun()
 

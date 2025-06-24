@@ -100,3 +100,18 @@ def sync_and_reload():
     """Clear cache and reload data"""
     st.cache_data.clear()
     return load_data()
+
+@st.cache_data
+def filtrar_dados_timesheet(df, ano=None, mes=None, corporation=None, teams=None, errors=None):
+    filtered = df.copy()
+    if corporation and corporation != 'All':
+        filtered = filtered[filtered['corporation_t1'] == corporation]
+    if teams:
+        filtered = filtered[filtered['team_t1'].isin(teams)]
+    if errors:
+        filtered = filtered[filtered['error_t1'].isin(errors)]
+    if ano:
+        filtered = filtered[filtered['year'] == ano]
+    if mes is not None and mes != 0:
+        filtered = filtered[filtered['month'] == mes]
+    return filtered
