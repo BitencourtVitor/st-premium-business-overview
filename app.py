@@ -234,6 +234,9 @@ def show_main_content():
         elif modal_page == 'timesheet_analysis' and "timesheet_admin" in user_data.get("roles", []):
             has_permission = True
             print("DEBUG: Permissão concedida para timesheet_analysis")
+        elif modal_page == 'accounting_indicators' and "accounting_admin" in user_data.get("roles", []):
+            has_permission = True
+            print("DEBUG: Permissão concedida para accounting_indicators")
         else:
             print(f"DEBUG: Sem permissão - modal_page={modal_page}, roles={user_data.get('roles', [])}")
         

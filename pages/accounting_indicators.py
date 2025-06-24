@@ -1,27 +1,340 @@
 import streamlit as st
-import logging
+import altair as alt
+import pandas as pd
+from datetime import datetime
+from database.database_accounting_indicators import load_data_accounting_indicators
+from database.mongodb_utils import get_collection_data_by_area, get_user_name
+from utils.modal import show_manage_modal
 
-logger = logging.getLogger(__name__)
+# Proteção de acesso: só usuários autenticados
+if not st.session_state.get('authenticated', False):
+    st.warning("Você precisa estar autenticado para acessar esta página.")
+    st.stop()
 
 def show_screen(user_data):
-    """Main function to display the accounting screen"""
-    st.header("Accounting Indicators")
-    
-    # Show admin controls only for accounting_admin role
-    if "accounting_admin" in user_data.get("roles", []):
-        st.button(":material/draw: Manage Accounting", key="manage_accounting_button", type='secondary')
-    
-    # Placeholder content
-    st.info("Accounting management module coming soon!")
-    
-    # Example of role-based content
-    if "accounting_admin" in user_data.get("roles", []):
-        st.write("As an accounting admin, you will be able to:")
-        st.write("- Manage financial records")
-        st.write("- Generate financial reports")
-        st.write("- Track expenses and revenue")
+    df = load_data_accounting_indicators()
+    if df.empty:
+        st.error("Erro ao carregar dados. Tente novamente mais tarde.")
+        return
+
+    # Conversão explícita dos tipos necessários para o gráfico funcionar
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    # Corrigir separador de milhar e converter para float
+    df["Open balance"] = df["Open balance"].str.replace(",", "").astype(float)
+
+    # Process data
+    df = df.dropna(subset=["Date"])  # Remove linhas com datas inválidas
+    df["month"] = df["Date"].dt.month.astype(int)
+    df["year"] = df["Date"].dt.year.astype(int)
+
+    # Filtros
+    aging_intervals = ["All"] + sorted(df["Aging Intervals"].dropna().unique())
+    categories = sorted(df["Category"].dropna().unique())
+
+    # Segment control: Receivables/Payables (Payables disabled)
+    seg_options = ["All", "Receivables"]  # Apenas All e Receivables
+    if "accounting_segmented_control" not in st.session_state:
+        st.session_state.accounting_segmented_control = "All"
+    if "accounting_aging_pill" not in st.session_state:
+        st.session_state.accounting_aging_pill = aging_intervals[0] if aging_intervals else None
+    if "accounting_category_multiselect" not in st.session_state:
+        st.session_state.accounting_category_multiselect = []
+
+    # Apply filters
+    filtered = df.copy()
+    selected_type = st.session_state.accounting_segmented_control
+    selected_aging = st.session_state.accounting_aging_pill
+    selected_categories = st.session_state.accounting_category_multiselect
+
+    if selected_type == "Receivables":
+        filtered = filtered[filtered["Transaction type"] == "Invoice"]
+    if selected_aging and selected_aging != "All":
+        filtered = filtered[filtered["Aging Intervals"] == selected_aging]
+    if selected_categories:
+        filtered = filtered[filtered["Category"].isin(selected_categories)]
+
+    # Filtros de ano e mês
+    available_years = sorted(filtered["year"].dropna().unique().astype(int))
+    if not available_years:
+        st.info("Nenhum dado disponível para os filtros selecionados.")
+        return
+    if 'selected_year_accounting_indicators' not in st.session_state or st.session_state.selected_year_accounting_indicators not in available_years:
+        current_year = datetime.now().year
+        st.session_state.selected_year_accounting_indicators = (
+            current_year if current_year in available_years 
+            else available_years[-1] if available_years 
+            else None
+        )
+    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_accounting_indicators']]
+    available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
+    if 'selected_month_accounting_indicators' not in st.session_state or (
+        st.session_state['selected_month_accounting_indicators'] not in available_months
+        and st.session_state['selected_month_accounting_indicators'] != 0
+    ):
+        st.session_state['selected_month_accounting_indicators'] = 0  # Complete Year como padrão
+    if st.session_state['selected_month_accounting_indicators'] == 0:
+        filtered_month = filtered_year
     else:
-        st.write("As a regular user, you will be able to:")
-        st.write("- View financial summaries")
-        st.write("- Access expense reports")
-        st.write("- Track budget allocations") 
+        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_accounting_indicators']]
+
+    # Carregar dados do MongoDB filtrados por área 'accounting'
+    action_plans = get_collection_data_by_area('action_plans', area_filter='accounting')
+    monthly_highlights = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter='accounting')
+    monthly_opportunities = get_collection_data_by_area('monthly_opportunities', include_id=True, area_filter='accounting')
+
+    # Definir ano/mês selecionados
+    selected_year = st.session_state['selected_year_accounting_indicators']
+    selected_month = st.session_state['selected_month_accounting_indicators']
+
+    # Filtrar dados do MongoDB conforme ano/mês selecionados
+    if selected_month == 0:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
+    else:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
+
+    # Filtros horizontalizados no topo (container sozinho, ponta a ponta)
+    with st.container(border=True):
+        col0, col1, col2, col3 = st.columns([1.3, 2, 3, 3], gap="small", vertical_alignment="center")
+        with col0:
+            st.subheader(":material/filter_list: Filters")
+        with col1:
+            st.segmented_control(
+                "Type",
+                options=seg_options,
+                key="accounting_segmented_control",
+                help="Select Receivables"
+            )
+        with col2:
+            st.pills(
+                "Aging Interval",
+                options=aging_intervals,
+                key="accounting_aging_pill"
+            )
+        with col3:
+            st.multiselect(
+                "Category",
+                options=categories,
+                key="accounting_category_multiselect"
+            )
+
+    # Agora, abaixo, as duas colunas principais
+    col_dados, col_lateral = st.columns([7, 3], gap="small")
+    with col_dados:
+        with st.container(border=True):
+            col_header, col_empty, col_btn = st.columns([3, 1, 1], vertical_alignment="center")
+            with col_header:
+                st.header(":material/calendar_month: Analysis by Month")
+            with col_empty:
+                st.empty()
+            with col_btn:
+                if "accounting_admin" in user_data.get("roles", []):
+                    if st.button(":material/database: Manage Data", key="manage_data_btn_accounting", type="secondary"):
+                        st.session_state['show_manage_modal'] = True
+                        st.session_state['modal_page'] = 'accounting_indicators'
+
+            # Controles de Year e Month na mesma linha (acima do gráfico)
+            col_year, col_month = st.columns([1, 3])
+            with col_year:
+                st.selectbox(
+                    "Year",
+                    options=available_years,
+                    key="selected_year_accounting_indicators"
+                )
+            with col_month:
+                months_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                months_options = available_months.copy()
+                months_labels_full = [months_labels[m-1] for m in months_options]
+                months_options_with_all = [0] + months_options  # 0 será 'Complete Year'
+                months_labels_with_all = ["Complete Year"] + months_labels_full
+                st.pills(
+                    label="Month",
+                    options=months_options_with_all,
+                    format_func=lambda x: months_labels_with_all[months_options_with_all.index(x)],
+                    key="selected_month_accounting_indicators"
+                )
+
+            # GRÁFICO (após filtros de ano/mês)
+            selected_type = st.session_state.accounting_segmented_control
+            selected_aging = st.session_state.accounting_aging_pill
+            selected_month = st.session_state['selected_month_accounting_indicators']
+            aging_interval_is_specific = selected_aging and selected_aging != "All"
+
+            if selected_month == 0:
+                # Ano completo: fechamento mensal
+                last_days = filtered_year.groupby('month')['Date'].max().reset_index()
+                merged = filtered_year.merge(last_days, on=['month', 'Date'])
+                if aging_interval_is_specific:
+                    chart_data = merged[merged["Aging Intervals"] == selected_aging].groupby(['Date'], as_index=False)['Open balance'].sum()
+                    color = None
+                elif selected_type == "Receivables":
+                    chart_data = merged.groupby(['Date', 'Aging Intervals'], as_index=False)['Open balance'].sum()
+                    color = alt.Color('Aging Intervals:N', title='Aging Intervals')
+                else:
+                    chart_data = merged.groupby(['Date'], as_index=False)['Open balance'].sum()
+                    color = None
+
+                # Adicionar coluna de mês abreviado para o eixo X
+                chart_data['month_str'] = chart_data['Date'].dt.strftime('%b')
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('month_str:N', axis=alt.Axis(title='Month')),
+                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value')),
+                    color=color if color else alt.value("#0068c9")
+                )
+                points_tooltip = [alt.Tooltip('month_str:N', title='Mês'), alt.Tooltip('Open balance:Q', title='Valor')]
+                if color:
+                    points_tooltip.insert(1, alt.Tooltip('Aging Intervals:N', title='Intervalo Etário'))
+                line = base.mark_line()
+                points = base.mark_point(filled=True, size=80).encode(
+                    tooltip=points_tooltip
+                )
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(orient='top', title=None, labelFontSize=12)
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                # Mês específico: valores diários
+                filtered_month = filtered_month.copy()
+                if aging_interval_is_specific:
+                    chart_data = filtered_month[filtered_month["Aging Intervals"] == selected_aging].groupby(["Date"], as_index=False)["Open balance"].sum()
+                    color = None
+                elif selected_type == "Receivables":
+                    chart_data = filtered_month.groupby(["Date", "Aging Intervals"], as_index=False)["Open balance"].sum()
+                    color = alt.Color('Aging Intervals:N', title='Intervalo Etário')
+                else:
+                    chart_data = filtered_month.groupby("Date", as_index=False)["Open balance"].sum()
+                    color = None
+
+                # Adicionar coluna de dia para o eixo X
+                chart_data['day_str'] = chart_data['Date'].dt.strftime('%d')
+                base = alt.Chart(chart_data).encode(
+                    x=alt.X('day_str:N', axis=alt.Axis(title='Day')),
+                    y=alt.Y('Open balance:Q', axis=alt.Axis(title='Value')),
+                    color=color if color else alt.value("#0068c9")
+                )
+                points_tooltip = [alt.Tooltip('day_str:N', title='Day'), alt.Tooltip('Open balance:Q', title='Value')]
+                if color:
+                    points_tooltip.insert(1, alt.Tooltip('Aging Intervals:N', title='Aging Intervals'))
+                line = base.mark_line()
+                points = base.mark_point(filled=True, size=80).encode(tooltip=points_tooltip)
+                chart = alt.layer(line, points)
+                chart = chart.configure_legend(orient='top', title=None, labelFontSize=12)
+                st.altair_chart(chart, use_container_width=True)
+            # Tabela: mostrar todas as colunas
+            st.markdown("### :material/table: Accounting Data")
+            st.dataframe(filtered_month, use_container_width=True, hide_index=True)
+    # COLUNA LATERAL: Monthly Highlights, Opportunities, Action Plans
+    with col_lateral:
+        with st.container(border=True):
+            # 1. Monthly Highlights
+            st.subheader(":material/rocket_launch: Monthly Highlights")
+            highlights_by_month = {}
+            for h in filtered_highlights:
+                key = (h.get('month', ''), h.get('year', ''))
+                if key not in highlights_by_month:
+                    highlights_by_month[key] = []
+                highlights_by_month[key].append(h)
+            if highlights_by_month:
+                for (month, year), highlights_list in sorted(highlights_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    user_name = "Usuário não encontrado"
+                    if highlights_list and 'user_id' in highlights_list[0]:
+                        user_name = get_user_name(highlights_list[0]['user_id'])
+                    with st.expander(f"{user_name} • {month}/{year}"):
+                        for highlight in highlights_list:
+                            col_pos, col_neg = st.columns(2)
+                            with col_pos:
+                                st.markdown(":material/thumb_up:  **Positives:**")
+                                for p in highlight.get('positive', []):
+                                    if p.get('title', '').startswith('**'):
+                                        st.markdown(f":blue[:material/star: {p.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":blue[:material/fiber_manual_record:] {p.get('title', '')}")
+                            with col_neg:
+                                st.markdown(":material/thumb_down:  **Negatives:**")
+                                for n in highlight.get('negative', []):
+                                    if n.get('title', '').startswith('**'):
+                                        st.markdown(f":red[:material/star: {n.get('title', '')}]")
+                                    else:
+                                        st.markdown(f":red[:material/fiber_manual_record:] {n.get('title', '')}")
+            else:
+                st.info("Nenhum destaque mensal encontrado.")
+            st.divider()
+            # 2. Opportunities
+            st.subheader(":material/emoji_objects: Opportunities")
+            opportunities_by_month = {}
+            for o in filtered_opportunities:
+                key = (o.get('month', ''), o.get('year', ''))
+                if key not in opportunities_by_month:
+                    opportunities_by_month[key] = []
+                opportunities_by_month[key].append(o)
+            if opportunities_by_month:
+                for (month, year), opp_list in sorted(opportunities_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
+                    user_name = "Usuário não encontrado"
+                    if opp_list and 'user_id' in opp_list[0]:
+                        user_name = get_user_name(opp_list[0]['user_id'])
+                    with st.expander(f"{user_name} • {month}/{year}"):
+                        opp_blocks = []
+                        for opp in opp_list:
+                            for o in opp.get('opportunity_list', []):
+                                opp_blocks.append(o)
+                        for idx, o in enumerate(opp_blocks):
+                            if idx > 0:
+                                st.divider()
+                            st.markdown(f"##### {o.get('title', '')}")
+                            st.markdown(":material/priority_high:  **Challenges:**")
+                            for c in o.get('challenges', []):
+                                st.markdown(f"- {c}")
+                            st.markdown(":material/trending_up:  **Improvements:**")
+                            for i in o.get('improvements', []):
+                                st.markdown(f"- {i}")
+            else:
+                st.info("Nenhuma oportunidade encontrada.")
+            st.divider()
+            # 3. Action Plans
+            st.subheader(":material/map: Action Plans")
+            if filtered_action_plans:
+                for plan in filtered_action_plans:
+                    with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
+                        created_at = plan.get('created_at', '')
+                        if hasattr(created_at, 'strftime'):
+                            created_at = created_at.strftime('%d/%m/%Y')
+                        st.caption(f"Created at {created_at}")
+                        subplans = plan.get('subplans', [])
+                        for idx, sub in enumerate(subplans):
+                            if idx > 0:
+                                st.divider()
+                            sub_title = sub.get('title', '')
+                            sub_reason = sub.get('reason', '')
+                            start = sub.get('start_date', '')
+                            end = sub.get('end_date', '')
+                            responsible = sub.get('responsible', '')
+                            if hasattr(start, 'strftime'):
+                                start = start.strftime('%d/%m')
+                            if hasattr(end, 'strftime'):
+                                end = end.strftime('%d/%m')
+                            st.markdown(f"##### {sub_title}")
+                            st.markdown(f"{sub_reason}")
+                            actions = sub.get('actions', [])
+                            if actions:
+                                for idx2, a in enumerate(actions, 1):
+                                    step_title = a.get('title', '')
+                                    responsible = a.get('responsible', '')
+                                    due_date = a.get('due_date', '')
+                                    if hasattr(due_date, 'strftime'):
+                                        due_date = due_date.strftime('%m/%d')
+                                    status = a.get('status', '')
+                                    st.markdown(f"###### {idx2}- {step_title}")
+                                    step_df = pd.DataFrame([
+                                        {
+                                            'Responsible': responsible,
+                                            'Due Date': due_date,
+                                            'Status': status
+                                        }
+                                    ])
+                                    st.dataframe(step_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Nenhuma etapa cadastrada.")
+            else:
+                st.info("Nenhum plano de ação encontrado.") 

@@ -16,7 +16,7 @@ def _modal_dialog():
     
     # Determinar qual área usar baseado na página atual
     current_page = st.session_state.get('current_page', 'timesheet_analysis')
-    area_filter = 'permit' if current_page == 'permit_control' else 'timesheet'
+    area_filter = 'permit' if current_page == 'permit_control' else 'accounting'
     
     # Obter o user_id do usuário atual
     current_user_id = st.session_state.get('user_data', {}).get('_id')
