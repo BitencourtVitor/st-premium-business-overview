@@ -16,18 +16,8 @@ def show_screen(user_data):
     if df is None:
         st.error('Dados não carregados. Refaça o login ou recarregue a página.')
         return
-
-    # Dados do MongoDB agora também do cache
-    action_plans = st.session_state.get('accounting_action_plans_cache')
-    monthly_highlights = st.session_state.get('accounting_monthly_highlights_cache')
-    monthly_opportunities = st.session_state.get('accounting_monthly_opportunities_cache')
-    if action_plans is None or monthly_highlights is None or monthly_opportunities is None:
-        st.error('Dados de destaques, oportunidades ou planos de ação não carregados. Refaça o login ou recarregue a página.')
-        return
-
     # Conversão explícita dos tipos necessários para o gráfico funcionar
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    # Corrigir separador de milhar e converter para float de forma robusta
     df["Open balance"] = (
         df["Open balance"]
         .astype(str)
@@ -35,32 +25,32 @@ def show_screen(user_data):
         .replace("nan", None)
         .astype(float)
     )
-
-    # Process data
-    df = df.dropna(subset=["Date"])  # Remove linhas com datas inválidas
+    df = df.dropna(subset=["Date"])
     df["month"] = df["Date"].dt.month.astype(int)
     df["year"] = df["Date"].dt.year.astype(int)
-
     # Filtros
     aging_intervals = ["All"] + sorted(df["Aging Intervals"].dropna().unique())
     categories = sorted(df["Category"].dropna().unique())
-
-    # Segment control: Receivables/Payables (Payables disabled)
-    seg_options = ["All", "Receivables"]  # Apenas All e Receivables
+    seg_options = ["All", "Receivables"]
     if "accounting_segmented_control" not in st.session_state:
         st.session_state.accounting_segmented_control = "All"
     if "accounting_aging_pill" not in st.session_state:
         st.session_state.accounting_aging_pill = aging_intervals[0] if aging_intervals else None
     if "accounting_category_multiselect" not in st.session_state:
         st.session_state.accounting_category_multiselect = []
-
-    # Apply filters
     selected_type = st.session_state.accounting_segmented_control
     selected_aging = st.session_state.accounting_aging_pill
     selected_categories = st.session_state.accounting_category_multiselect
-
-    # Ano e mês
-    available_years = sorted(df["year"].dropna().unique().astype(int))
+    # Aplicar filtros manualmente (como era antes)
+    filtered = df.copy()
+    if selected_type == "Receivables":
+        filtered = filtered[filtered["Transaction type"] == "Invoice"]
+    if selected_aging and selected_aging != "All":
+        filtered = filtered[filtered["Aging Intervals"] == selected_aging]
+    if selected_categories:
+        filtered = filtered[filtered["Category"].isin(selected_categories)]
+    # Filtros de ano e mês
+    available_years = sorted(filtered["year"].dropna().unique().astype(int))
     if not available_years:
         st.info("Nenhum dado disponível para os filtros selecionados.")
         return
@@ -71,26 +61,33 @@ def show_screen(user_data):
             else available_years[-1] if available_years 
             else None
         )
-    selected_year = st.session_state['selected_year_accounting_indicators']
-    filtered_year = df[df["year"] == selected_year]
+    filtered_year = filtered[filtered["year"] == st.session_state['selected_year_accounting_indicators']]
     available_months = sorted(filtered_year["month"].dropna().unique().astype(int))
     if 'selected_month_accounting_indicators' not in st.session_state or (
         st.session_state['selected_month_accounting_indicators'] not in available_months
         and st.session_state['selected_month_accounting_indicators'] != 0
     ):
         st.session_state['selected_month_accounting_indicators'] = 0
+    if st.session_state['selected_month_accounting_indicators'] == 0:
+        filtered_month = filtered_year
+    else:
+        filtered_month = filtered_year[filtered_year["month"] == st.session_state['selected_month_accounting_indicators']]
+    # Definir ano/mês selecionados
+    selected_year = st.session_state['selected_year_accounting_indicators']
     selected_month = st.session_state['selected_month_accounting_indicators']
-
-    # --- USAR FUNÇÃO CACHEADA PARA FILTRAR ---
-    filtered_month = filtrar_dados_accounting(
-        df,
-        ano=selected_year,
-        mes=selected_month,
-        categorias=selected_categories,
-        tipo=selected_type,
-        aging=selected_aging
-    )
-
+    # --- USAR DADOS DO MONGODB PARA OS CARDS LATERAIS ---
+    action_plans = st.session_state.get('accounting_action_plans_cache', [])
+    monthly_highlights = st.session_state.get('accounting_monthly_highlights_cache', [])
+    monthly_opportunities = st.session_state.get('accounting_monthly_opportunities_cache', [])
+    # Filtrar conforme ano/mês selecionados
+    if selected_month == 0:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year]
+    else:
+        filtered_action_plans = [p for p in action_plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == selected_year and p['created_at'].month == selected_month]
+        filtered_highlights = [h for h in monthly_highlights if h.get('year') == selected_year and h.get('month') == selected_month]
+        filtered_opportunities = [o for o in monthly_opportunities if o.get('year') == selected_year and o.get('month') == selected_month]
     # Filtros horizontalizados no topo (container sozinho, ponta a ponta)
     with st.container(border=True):
         col0, col1, col2, col3 = st.columns([1.3, 2, 3, 3], gap="small", vertical_alignment="center")
@@ -226,16 +223,19 @@ def show_screen(user_data):
             # 1. Monthly Highlights
             st.subheader(":material/rocket_launch: Monthly Highlights")
             highlights_by_month = {}
-            for _, h in filtered_month.iterrows():
+            for h in filtered_highlights:
                 key = (h.get('month', ''), h.get('year', ''))
                 if key not in highlights_by_month:
                     highlights_by_month[key] = []
                 highlights_by_month[key].append(h)
             if highlights_by_month:
                 for (month, year), highlights_list in sorted(highlights_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
-                    user_name = "Usuário não encontrado"
-                    if highlights_list and 'user_id' in highlights_list[0]:
-                        user_name = get_user_name(highlights_list[0]['user_id'])
+                    user_name = "Usuário não informado"
+                    if highlights_list and 'user_id' in highlights_list[0] and highlights_list[0]['user_id']:
+                        try:
+                            user_name = get_user_name(highlights_list[0]['user_id'])
+                        except Exception as e:
+                            user_name = f"Erro ao buscar usuário: {e}"
                     with st.expander(f"{user_name} • {month}/{year}"):
                         for highlight in highlights_list:
                             col_pos, col_neg = st.columns(2)
@@ -259,16 +259,19 @@ def show_screen(user_data):
             # 2. Opportunities
             st.subheader(":material/emoji_objects: Opportunities")
             opportunities_by_month = {}
-            for _, o in filtered_month.iterrows():
+            for o in filtered_opportunities:
                 key = (o.get('month', ''), o.get('year', ''))
                 if key not in opportunities_by_month:
                     opportunities_by_month[key] = []
                 opportunities_by_month[key].append(o)
             if opportunities_by_month:
                 for (month, year), opp_list in sorted(opportunities_by_month.items(), key=lambda x: (x[1][0].get('year', 0), x[1][0].get('month', 0))):
-                    user_name = "Usuário não encontrado"
-                    if opp_list and 'user_id' in opp_list[0]:
-                        user_name = get_user_name(opp_list[0]['user_id'])
+                    user_name = "Usuário não informado"
+                    if opp_list and 'user_id' in opp_list[0] and opp_list[0]['user_id']:
+                        try:
+                            user_name = get_user_name(opp_list[0]['user_id'])
+                        except Exception as e:
+                            user_name = f"Erro ao buscar usuário: {e}"
                     with st.expander(f"{user_name} • {month}/{year}"):
                         opp_blocks = []
                         for opp in opp_list:
@@ -289,8 +292,8 @@ def show_screen(user_data):
             st.divider()
             # 3. Action Plans
             st.subheader(":material/map: Action Plans")
-            if not filtered_month.empty:
-                for _, plan in filtered_month.iterrows():
+            if filtered_action_plans:
+                for plan in filtered_action_plans:
                     with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):
