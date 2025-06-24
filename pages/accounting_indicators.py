@@ -226,7 +226,7 @@ def show_screen(user_data):
             # 1. Monthly Highlights
             st.subheader(":material/rocket_launch: Monthly Highlights")
             highlights_by_month = {}
-            for h in filtered_month:
+            for _, h in filtered_month.iterrows():
                 key = (h.get('month', ''), h.get('year', ''))
                 if key not in highlights_by_month:
                     highlights_by_month[key] = []
@@ -259,7 +259,7 @@ def show_screen(user_data):
             # 2. Opportunities
             st.subheader(":material/emoji_objects: Opportunities")
             opportunities_by_month = {}
-            for o in filtered_month:
+            for _, o in filtered_month.iterrows():
                 key = (o.get('month', ''), o.get('year', ''))
                 if key not in opportunities_by_month:
                     opportunities_by_month[key] = []
@@ -289,8 +289,8 @@ def show_screen(user_data):
             st.divider()
             # 3. Action Plans
             st.subheader(":material/map: Action Plans")
-            if filtered_month:
-                for plan in filtered_month:
+            if not filtered_month.empty:
+                for _, plan in filtered_month.iterrows():
                     with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):
