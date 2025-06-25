@@ -298,7 +298,6 @@ def show_screen(user_data):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):
                             created_at = created_at.strftime('%d/%m/%Y')
-                        st.caption(f"Created at {created_at}")
                         subplans = plan.get('subplans', [])
                         for idx, sub in enumerate(subplans):
                             if idx > 0:

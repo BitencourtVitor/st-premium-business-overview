@@ -203,15 +203,27 @@ def _modal_dialog():
         if month is None:
             month = datetime.now().month
             
-        plans = get_collection_data_by_area('action_plans', area_filter=area_filter)
+        plans = get_collection_data_by_area('action_plans', area_filter=area_filter, include_id=True)
         filtered = [p for p in plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == year and p['created_at'].month == month]
         st.write("### Action Plan for selected month/year")
-        # Helper to manage subplans/actions in session_state
+        def generate_id(prefix, existing):
+            idx = 1
+            while f"{prefix}{idx}" in existing:
+                idx += 1
+            return f"{prefix}{idx}"
         def get_plan_state():
             key = f"plan_state_{year}_{month}"
             if key not in st.session_state:
                 if filtered:
-                    st.session_state[key] = filtered[0].copy()
+                    # Garantir que subplans/actions tenham id
+                    plan = filtered[0].copy()
+                    for sidx, sub in enumerate(plan.get('subplans', [])):
+                        if 'id' not in sub or not sub['id']:
+                            sub['id'] = f"sub{sidx+1}"
+                        for aidx, a in enumerate(sub.get('actions', [])):
+                            if 'id' not in a or not a['id']:
+                                a['id'] = f"a{aidx+1}"
+                    st.session_state[key] = plan
                 else:
                     st.session_state[key] = {
                         'title': '',
@@ -221,7 +233,6 @@ def _modal_dialog():
                     }
             return st.session_state[key]
         plan_state = get_plan_state()
-        # Plan fields
         with st.container(border=True):
             st.markdown("#### :material/assignment: Plan Details")
             col1, col2 = st.columns(2)
@@ -229,10 +240,9 @@ def _modal_dialog():
                 plan_state['title'] = st.text_input("Title", value=plan_state.get('title',''), key=f"plan_title")
             with col2:
                 plan_state['description'] = st.text_area("Description", value=plan_state.get('description',''), key=f"plan_desc")
-        # Subplans
         st.markdown("---")
         st.markdown(":material/list: **Subplans**")
-        subplan_changed = False  # Flag para controlar alterações
+        subplan_changed = False
         for sidx, sub in enumerate(plan_state['subplans']):
             with st.container(border=True):
                 scol1, scol2, scol3, scol4 = st.columns([2.2,2.6,1.2,1], vertical_alignment="center")
@@ -248,7 +258,7 @@ def _modal_dialog():
                         plan_state['subplans'].pop(sidx)
                         subplan_changed = True
                 st.markdown(":material/list_alt: **Actions**")
-                action_changed = False  # Flag para ações
+                action_changed = False
                 for aidx, a in enumerate(sub.get('actions', [])):
                     with st.container(border=True):
                         ac1, ac2, ac3, ac4, ac5 = st.columns([3,1.5,1.75,1.75,1], vertical_alignment="center")
@@ -264,91 +274,93 @@ def _modal_dialog():
                             if st.button(":material/delete:", key=f"remove_action_{sidx}_{aidx}"):
                                 sub['actions'].pop(aidx)
                                 action_changed = True
+                        # Garantir id
+                        if 'id' not in a or not a['id']:
+                            a['id'] = f"a{aidx+1}"
                 if action_changed:
                     st.rerun()
                 if st.button(":material/add: Add Action", key=f"add_action_{sidx}"):
                     if 'actions' not in sub:
                         sub['actions'] = []
+                    # Gerar id único
+                    existing_ids = {a['id'] for a in sub['actions'] if 'id' in a}
+                    new_id = generate_id('a', existing_ids)
                     sub['actions'].append({
-                        'title': '', 'status': '', 'due_date': datetime(year, month, 1), 'responsible': ''
+                        'id': new_id, 'title': '', 'status': '', 'due_date': datetime(year, month, 1), 'responsible': ''
                     })
                     st.rerun()
+                # Garantir id do subplan
+                if 'id' not in sub or not sub['id']:
+                    sub['id'] = f"sub{sidx+1}"
         if subplan_changed:
             st.rerun()
         if st.button(":material/add: Add Subplan", key="add_subplan"):
+            # Gerar id único
+            existing_ids = {s['id'] for s in plan_state['subplans'] if 'id' in s}
+            new_id = generate_id('sub', existing_ids)
             plan_state['subplans'].append({
-                'title': '', 'reason': '', 'start_date': datetime(year, month, 1), 'end_date': datetime(year, month, 1), 'actions': []
+                'id': new_id, 'title': '', 'reason': '', 'start_date': datetime(year, month, 1), 'end_date': datetime(year, month, 1), 'actions': []
             })
             st.rerun()
         st.markdown("---")
         col_save, col_delete = st.columns([2,1]); save_success = False
         with col_save:
             if st.button(":material/save: Save Action Plan", key=f"save_plan", type="primary"):
-                # Validação mínima
-                if not plan_state.get('title'):
-                    st.error("O título do plano é obrigatório.")
-                else:
-                    def ensure_datetime(obj):
-                        if isinstance(obj, datetime):
-                            return obj
-                        elif hasattr(obj, 'year') and hasattr(obj, 'month') and hasattr(obj, 'day'):
-                            return datetime(obj.year, obj.month, obj.day)
+                def ensure_datetime(obj):
+                    if isinstance(obj, datetime):
                         return obj
-                    for sub in plan_state['subplans']:
-                        sub['start_date'] = ensure_datetime(sub.get('start_date'))
-                        sub['end_date'] = ensure_datetime(sub.get('end_date'))
-                        for a in sub.get('actions', []):
-                            a['due_date'] = ensure_datetime(a.get('due_date'))
-                    plan_state['created_at'] = ensure_datetime(plan_state.get('created_at'))
-                    try:
-                        plan_state['user_id'] = current_user_id
-                        plan_state['area'] = area_filter
-                        update_document('action_plans', {'title': plan_state.get('title'), 'created_at': plan_state.get('created_at')}, plan_state)
+                    elif hasattr(obj, 'year') and hasattr(obj, 'month') and hasattr(obj, 'day'):
+                        return datetime(obj.year, obj.month, obj.day)
+                    return obj
+                # Sincronizar subplans/actions dos widgets
+                new_subplans = []
+                for sidx, sub in enumerate(plan_state['subplans']):
+                    new_sub = {
+                        'id': sub.get('id', f'sub{sidx+1}'),
+                        'title': st.session_state.get(f"subplan_title_{sidx}", sub.get('title', '')),
+                        'reason': st.session_state.get(f"subplan_reason_{sidx}", sub.get('reason', '')),
+                        'start_date': ensure_datetime(st.session_state.get(f"subplan_start_{sidx}", sub.get('start_date'))),
+                        'end_date': ensure_datetime(st.session_state.get(f"subplan_end_{sidx}", sub.get('end_date'))),
+                        'actions': []
+                    }
+                    for aidx, a in enumerate(sub.get('actions', [])):
+                        new_action = {
+                            'id': a.get('id', f'a{aidx+1}'),
+                            'title': st.session_state.get(f"action_title_{sidx}_{aidx}", a.get('title', '')),
+                            'status': st.session_state.get(f"action_status_{sidx}_{aidx}", a.get('status', '')),
+                            'due_date': ensure_datetime(st.session_state.get(f"action_due_{sidx}_{aidx}", a.get('due_date'))),
+                            'responsible': st.session_state.get(f"action_resp_{sidx}_{aidx}", a.get('responsible', ''))
+                        }
+                        new_sub['actions'].append(new_action)
+                    new_subplans.append(new_sub)
+                plan_state['subplans'] = new_subplans
+                plan_state['created_at'] = ensure_datetime(plan_state.get('created_at'))
+                try:
+                    plan_state['user_id'] = current_user_id
+                    plan_state['area'] = area_filter
+                    if filtered:
+                        filter_query = {'_id': filtered[0]['_id']}
+                        update_document('action_plans', filter_query, plan_state)
                         st.success("Updated!")
-                        save_success = True
-                    except Exception as e:
-                        st.error(f"Erro ao salvar: {e}")
+                    else:
+                        insert_document('action_plans', plan_state)
+                        st.success("Created!")
+                    save_success = True
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
         with col_delete:
             def delete_plan():
                 try:
-                    delete_document('action_plans', {'title': plan_state.get('title'), 'created_at': plan_state.get('created_at')})
+                    filter_query = {'_id': filtered[0]['_id']}
+                    delete_document('action_plans', filter_query)
                     st.success("Deleted!")
                     st.session_state['modal_open'] = False
                     st.session_state['show_manage_modal'] = False
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao deletar: {e}")
-            confirm_delete(":material/delete: Delete", delete_plan, key=f"popover_plan")
-        if not filtered:
-            st.info("No Action Plan for this month/year. Fill the fields above to create one.")
-            if st.button(":material/add: Create Action Plan", key="create_plan"):
-                # Validação mínima
-                if not plan_state.get('title'):
-                    st.error("O título do plano é obrigatório.")
-                else:
-                    def ensure_datetime(obj):
-                        if isinstance(obj, datetime):
-                            return obj
-                        elif hasattr(obj, 'year') and hasattr(obj, 'month') and hasattr(obj, 'day'):
-                            return datetime(obj.year, obj.month, obj.day)
-                        return obj
-                    for sub in plan_state['subplans']:
-                        sub['start_date'] = ensure_datetime(sub.get('start_date'))
-                        sub['end_date'] = ensure_datetime(sub.get('end_date'))
-                        for a in sub.get('actions', []):
-                            a['due_date'] = ensure_datetime(a.get('due_date'))
-                    plan_state['created_at'] = ensure_datetime(plan_state.get('created_at'))
-                    try:
-                        plan_state['user_id'] = current_user_id
-                        plan_state['area'] = area_filter
-                        insert_document('action_plans', plan_state)
-                        st.success("Created!")
-                        st.session_state['modal_open'] = False
-                        st.session_state['show_manage_modal'] = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao criar: {e}")
-        # Só fechar o modal após salvar/deletar/criar
+            if filtered:
+                confirm_delete(":material/delete: Delete", delete_plan, key=f"popover_plan")
         if save_success:
             st.session_state['modal_open'] = False
             st.session_state['show_manage_modal'] = False
