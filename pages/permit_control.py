@@ -7,6 +7,8 @@ from database.database_permit_control import *
 from database.mongodb_utils import get_collection_data, get_user_name, get_collection_data_by_area
 from utils.modal import show_manage_modal
 from database.database_permit_control import load_data_permit_control, filtrar_dados_permit
+import io
+import datetime as dt
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +176,7 @@ def show_screen(user_data):
                 # Criar linhas separadas para cada situação
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('month:O', axis=alt.Axis(title='Month', values=list(range(1,13)), labelExpr='datum.value')),
-                    y=alt.Y('count:Q', axis=alt.Axis(title='Count')),
+                    y=alt.Y('count:Q', axis=alt.Axis(title='Permit (HVAC)', format='d')),
                     color=alt.Color('Situation:N', scale=alt.Scale(
                         domain=['Issued', 'Applied', 'Not Applied'],
                         range=['green', 'blue', 'orange']
@@ -185,7 +187,7 @@ def show_screen(user_data):
                     tooltip=[
                         alt.Tooltip('month:O', title='Month'),
                         alt.Tooltip('Situation:N', title='Situation'),
-                        alt.Tooltip('count:Q', title='Count')
+                        alt.Tooltip('count:Q', title='Permit (HVAC)')
                     ]
                 )
                 chart = alt.layer(line, points)
@@ -203,7 +205,7 @@ def show_screen(user_data):
                 
                 base = alt.Chart(chart_data).encode(
                     x=alt.X('day:O', axis=alt.Axis(title='Day')),
-                    y=alt.Y('count:Q', axis=alt.Axis(title='Count')),
+                    y=alt.Y('count:Q', axis=alt.Axis(title='Permit (HVAC)', format='d')),
                     color=alt.Color('Situation:N', scale=alt.Scale(
                         domain=['Issued', 'Applied', 'Not Applied'],
                         range=['green', 'blue', 'orange']
@@ -214,7 +216,7 @@ def show_screen(user_data):
                     tooltip=[
                         alt.Tooltip('day:O', title='Day'),
                         alt.Tooltip('Situation:N', title='Situation'),
-                        alt.Tooltip('count:Q', title='Count')
+                        alt.Tooltip('count:Q', title='Permit (HVAC)')
                     ]
                 )
                 chart = alt.layer(line, points)
@@ -400,7 +402,7 @@ def show_screen(user_data):
                     with st.expander(f"{plan.get('title', '')}  |  **{plan.get('description', '')}**"):
                         created_at = plan.get('created_at', '')
                         if hasattr(created_at, 'strftime'):
-                            created_at = created_at.strftime('%d/%m/%Y')
+                            created_at = created_at.strftime('%m/%d/%Y')
                         subplans = plan.get('subplans', [])
                         if subplans:
                             for idx, sub in enumerate(subplans):
@@ -412,9 +414,9 @@ def show_screen(user_data):
                                 end = sub.get('end_date', '')
                                 responsible = sub.get('responsible', '')
                                 if hasattr(start, 'strftime'):
-                                    start = start.strftime('%d/%m')
+                                    start = start.strftime('%m/%d')
                                 if hasattr(end, 'strftime'):
-                                    end = end.strftime('%d/%m')
+                                    end = end.strftime('%m/%d')
                                 st.markdown(f"##### {sub_title}")
                                 st.markdown(f"{sub_reason}")
                                 actions = sub.get('actions', [])
@@ -439,5 +441,54 @@ def show_screen(user_data):
                                     st.info("Nenhuma etapa cadastrada.")
                         else:
                             st.info("Nenhum subplano cadastrado.")
+                        # Botão de download Excel no final
+                        st.divider()
+                        def format_date_only(val):
+                            if isinstance(val, (dt.datetime, dt.date)):
+                                return val.strftime('%m/%d/%Y')
+                            if isinstance(val, str):
+                                try:
+                                    return pd.to_datetime(val).strftime('%m/%d/%Y')
+                                except:
+                                    return val
+                            return val
+                        plan_data = {
+                            'Title': plan.get('title', ''),
+                            'Description': plan.get('description', ''),
+                            'Created At': format_date_only(plan.get('created_at', '')),
+                            'Area': plan.get('area', ''),
+                        }
+                        subplans_data = []
+                        actions_data = []
+                        for sub in subplans:
+                            sub_dict = {
+                                'Subplan Title': sub.get('title', ''),
+                                'Reason': sub.get('reason', ''),
+                                'Start Date': format_date_only(sub.get('start_date', '')),
+                                'End Date': format_date_only(sub.get('end_date', '')),
+                            }
+                            subplans_data.append(sub_dict)
+                            for a in sub.get('actions', []):
+                                actions_data.append({
+                                    'Subplan Title': sub.get('title', ''),
+                                    'Action Title': a.get('title', ''),
+                                    'Status': a.get('status', ''),
+                                    'Due Date': format_date_only(a.get('due_date', '')),
+                                    'Responsible': a.get('responsible', ''),
+                                })
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            pd.DataFrame([plan_data]).to_excel(writer, index=False, sheet_name='Plan')
+                            pd.DataFrame(subplans_data).to_excel(writer, index=False, sheet_name='Subplans')
+                            pd.DataFrame(actions_data).to_excel(writer, index=False, sheet_name='Actions')
+                        output.seek(0)
+                        st.download_button(
+                            label=':material/file_save:',
+                            data=output,
+                            file_name=f"action_plan_{plan.get('title','plan')}.xlsx",
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            use_container_width=True,
+                            help='Exportar para Excel'
+                        )
             else:
                 st.info("Nenhum plano de ação encontrado.")

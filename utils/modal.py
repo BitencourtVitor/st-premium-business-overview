@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from database.mongodb_utils import get_collection_data_by_area, insert_document, update_document, delete_document
 from bson import ObjectId
 
@@ -17,7 +17,17 @@ def _modal_dialog():
     
     # Determinar qual área usar baseado na página atual
     current_page = st.session_state.get('current_page', 'timesheet_analysis')
-    area_filter = 'permit' if current_page == 'permit_control' else 'accounting'
+    # Novo mapeamento expansivo de páginas para áreas
+    PAGE_AREA_MAP = {
+        'permit_control': 'permit',
+        'accounting_indicators': 'accounting',
+        'timesheet_analysis': 'timesheet',
+        # Adicione aqui novas páginas e áreas conforme necessário
+    }
+    # Tenta mapear, senão usa o nome da página (removendo sufixos comuns)
+    area_filter = PAGE_AREA_MAP.get(current_page)
+    if area_filter is None:
+        area_filter = current_page.replace('_analysis', '').replace('pages/', '')
     
     # Obter o user_id do usuário atual
     current_user_id = st.session_state.get('user_data', {}).get('_id')
@@ -256,11 +266,27 @@ def _modal_dialog():
                         with ac1:
                             a['title'] = st.text_input("Action Title", value=a.get('title',''), key=f"action_title_{sidx}_{aidx}")
                         with ac2:
-                            a['status'] = st.text_input("Status", value=a.get('status',''), key=f"action_status_{sidx}_{aidx}")
+                            a['status'] = st.selectbox(
+                                "Status",
+                                options=["Pending", "Completed"],
+                                index=["Pending", "Completed"].index(a.get('status', 'Pending')) if a.get('status', 'Pending') in ["Pending", "Completed"] else 0,
+                                key=f"action_status_{sidx}_{aidx}"
+                            )
                         with ac3:
                             a['due_date'] = st.date_input("Due Date", value=pd.to_datetime(a.get('due_date')) if a.get('due_date') else datetime(year, month, 1), key=f"action_due_{sidx}_{aidx}")
                         with ac4:
-                            a['responsible'] = st.text_input("Responsible", value=a.get('responsible',''), key=f"action_resp_{sidx}_{aidx}")
+                            responsible_options = [
+                                "Ananda", "Diego", "Eleana", "Felipe", "Guilherme", "Italo", "Josimar", "Leonardo", "Paula", "Thiago", "Victor Paiva", "Vinicius", "Vitor Bitencourt", "Williana"
+                            ]
+                            responsible_options.sort()
+                            a['responsible'] = st.selectbox(
+                                "Responsible",
+                                options=responsible_options,
+                                index=responsible_options.index(a.get('responsible')) if a.get('responsible') in responsible_options else 0,
+                                key=f"action_resp_{sidx}_{aidx}",
+                                placeholder="Select or type...",
+                                accept_new_options=True
+                            )
                         with ac5:
                             if st.button(":material/delete:", key=f"remove_action_{sidx}_{aidx}"):
                                 sub['actions'].pop(aidx)
@@ -275,7 +301,7 @@ def _modal_dialog():
                     existing_ids = {a['id'] for a in sub['actions'] if 'id' in a}
                     new_id = generate_id('a', existing_ids)
                     sub['actions'].append({
-                        'id': new_id, 'title': '', 'status': '', 'due_date': datetime(year, month, 1), 'responsible': ''
+                        'id': new_id, 'title': '', 'status': 'Pending', 'due_date': datetime(year, month, 1), 'responsible': ''
                     })
                     st.rerun()
                 if 'id' not in sub or not sub['id']:
@@ -290,9 +316,21 @@ def _modal_dialog():
             })
             st.rerun()
         st.markdown("---")
+        # Verificação de datas inválidas nas ações
+        invalid_due_date = False
+        for sub in plan_state['subplans']:
+            for a in sub.get('actions', []):
+                due = a.get('due_date')
+                if due and pd.to_datetime(due).date() < date.today():
+                    invalid_due_date = True
+                    break
+            if invalid_due_date:
+                break
+        if invalid_due_date:
+            st.warning(':material/error: Existem ações com data inferior à data de hoje. Corrija para salvar o plano.')
         col_save, col_delete = st.columns([2,1]); save_success = False
         with col_save:
-            if st.button(":material/save: Save Action Plan", key=f"save_plan", type="primary"):
+            if st.button(":material/save: Save Action Plan", key=f"save_plan", type="primary", disabled=invalid_due_date):
                 def ensure_datetime(obj):
                     if isinstance(obj, datetime):
                         return obj
