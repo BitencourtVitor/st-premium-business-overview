@@ -23,7 +23,7 @@ def show_screen(user_data):
         return
 
     # Dados do MongoDB agora também do cache
-    action_plans = st.session_state.get('permit_action_plans_cache')
+    action_plans = get_collection_data_by_area('action_plans', area_filter='permit')
     monthly_highlights = st.session_state.get('permit_monthly_highlights_cache')
     monthly_opportunities = st.session_state.get('permit_monthly_opportunities_cache')
     if action_plans is None or monthly_highlights is None or monthly_opportunities is None:
@@ -402,40 +402,42 @@ def show_screen(user_data):
                         if hasattr(created_at, 'strftime'):
                             created_at = created_at.strftime('%d/%m/%Y')
                         subplans = plan.get('subplans', [])
-                        for idx, sub in enumerate(subplans):
-                            if idx > 0:
-                                st.divider()
-                            sub_title = sub.get('title', '')
-                            sub_reason = sub.get('reason', '')
-                            start = sub.get('start_date', '')
-                            end = sub.get('end_date', '')
-                            responsible = sub.get('responsible', '')
-                            if hasattr(start, 'strftime'):
-                                start = start.strftime('%d/%m')
-                            if hasattr(end, 'strftime'):
-                                end = end.strftime('%d/%m')
-                            st.markdown(f"##### {sub_title}")
-                            st.markdown(f"{sub_reason}")
-                            # Exibir cada etapa como título e tabela
-                            actions = sub.get('actions', [])
-                            if actions:
-                                for idx2, a in enumerate(actions, 1):
-                                    step_title = a.get('title', '')
-                                    responsible = a.get('responsible', '')
-                                    due_date = a.get('due_date', '')
-                                    if hasattr(due_date, 'strftime'):
-                                        due_date = due_date.strftime('%m/%d')
-                                    status = a.get('status', '')
-                                    st.markdown(f"###### {idx2}- {step_title}")
-                                    step_df = pd.DataFrame([
-                                        {
-                                            'Responsible': responsible,
-                                            'Due Date': due_date,
-                                            'Status': status
-                                        }
-                                    ])
-                                    st.dataframe(step_df, use_container_width=True, hide_index=True)
-                            else:
-                                st.info("Nenhuma etapa cadastrada.")
+                        if subplans:
+                            for idx, sub in enumerate(subplans):
+                                if idx > 0:
+                                    st.divider()
+                                sub_title = sub.get('title', '')
+                                sub_reason = sub.get('reason', '')
+                                start = sub.get('start_date', '')
+                                end = sub.get('end_date', '')
+                                responsible = sub.get('responsible', '')
+                                if hasattr(start, 'strftime'):
+                                    start = start.strftime('%d/%m')
+                                if hasattr(end, 'strftime'):
+                                    end = end.strftime('%d/%m')
+                                st.markdown(f"##### {sub_title}")
+                                st.markdown(f"{sub_reason}")
+                                actions = sub.get('actions', [])
+                                if actions:
+                                    for idx2, a in enumerate(actions, 1):
+                                        step_title = a.get('title', '')
+                                        responsible = a.get('responsible', '')
+                                        due_date = a.get('due_date', '')
+                                        if hasattr(due_date, 'strftime'):
+                                            due_date = due_date.strftime('%m/%d')
+                                        status = a.get('status', '')
+                                        st.markdown(f"###### {idx2}- {step_title}")
+                                        step_df = pd.DataFrame([
+                                            {
+                                                'Responsible': responsible,
+                                                'Due Date': due_date,
+                                                'Status': status
+                                            }
+                                        ])
+                                        st.dataframe(step_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.info("Nenhuma etapa cadastrada.")
+                        else:
+                            st.info("Nenhum subplano cadastrado.")
             else:
                 st.info("Nenhum plano de ação encontrado.")

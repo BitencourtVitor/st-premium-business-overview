@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from database.mongodb_utils import get_collection_data_by_area, insert_document, update_document, delete_document
+from bson import ObjectId
 
 def set_active_tab(tab_name):
     st.session_state['active_modal_tab'] = tab_name
@@ -31,7 +32,7 @@ def _modal_dialog():
     selected_tabs = st.tabs(tab_names)
     tab_map = dict(zip(tab_names, selected_tabs))
 
-    # Helper for popover confirmation
+    # Helper for popover confirmation (precisa estar definida antes do uso)
     def confirm_delete(label, on_confirm, key):
         with st.popover(label):
             st.write("Are you sure you want to delete?")
@@ -47,33 +48,34 @@ def _modal_dialog():
 
     with tab_map["Monthly Highlights"]:
         set_active_tab("Monthly Highlights")
-        years = sorted({h.get('year') for h in get_collection_data_by_area('monthly_highlights', area_filter=area_filter) if h.get('year')})
-        
-        # Se não há anos disponíveis, usar o ano atual
+        # Buscar todos os anos disponíveis para o usuário logado
+        all_highlights = get_collection_data_by_area('monthly_highlights', area_filter=area_filter, include_id=True)
+        obj_user_id = ObjectId(current_user_id) if current_user_id else None
+        years = sorted({h.get('year') for h in all_highlights if h.get('year') and h.get('user_id') == obj_user_id})
         if not years:
             years = [datetime.now().year]
-            
         col1, col2 = st.columns(2)
         with col1:
             year = st.selectbox("Year", options=years, index=years.index(datetime.now().year) if datetime.now().year in years else 0, key="highlight_year", on_change=lambda: set_active_tab("Monthly Highlights"))
         with col2:
-            month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.get("highlight_month", datetime.now().month), step=1, key="highlight_month", on_change=lambda: set_active_tab("Monthly Highlights"))
-        
-        # Validar que year e month não são None
-        if year is None:
-            year = datetime.now().year
-        if month is None:
-            month = datetime.now().month
-            
-        highlights = get_collection_data_by_area('monthly_highlights', area_filter=area_filter)
-        filtered = [h for h in highlights if h.get('year') == year and h.get('month') == month]
+            months_for_year = sorted({h.get('month') for h in all_highlights if h.get('year') == year and h.get('month') and h.get('user_id') == obj_user_id})
+            if not months_for_year:
+                months_for_year = [datetime.now().month]
+            month = st.selectbox("Month", options=months_for_year, index=0, key="highlight_month", on_change=lambda: set_active_tab("Monthly Highlights"))
+        # Buscar highlights do banco filtrando por user_id, ano, mês, área
+        highlights = get_collection_data_by_area('monthly_highlights', area_filter=area_filter, include_id=True)
+        filtered = [
+            h for h in highlights
+            if h.get('year') == year and h.get('month') == month and h.get('user_id') == obj_user_id
+        ]
         st.write("### Highlights for selected month/year")
         if filtered:
             h = filtered[0]
             pos = st.text_area("Positives (one per line)", value="\n".join([p.get('title','') for p in h.get('positive', [])]), key=f"edit_highlight_pos")
             neg = st.text_area("Negatives (one per line)", value="\n".join([n.get('title','') for n in h.get('negative', [])]), key=f"edit_highlight_neg")
             if st.button(":material/save: Save", key=f"save_highlight"):
-                update_document('monthly_highlights', {'year': year, 'month': month}, {
+                filter_query = {'_id': h['_id']} if '_id' in h else {'year': year, 'month': month, 'user_id': current_user_id}
+                update_document('monthly_highlights', filter_query, {
                     'year': year,
                     'month': month,
                     'user_id': current_user_id,
@@ -81,12 +83,9 @@ def _modal_dialog():
                     'positive': [{'title': t.strip()} for t in pos.splitlines() if t.strip()],
                     'negative': [{'title': t.strip()} for t in neg.splitlines() if t.strip()]
                 })
-                # Atualizar cache apenas após salvar
-                cache_key = f"{area_filter}_monthly_highlights_cache"
-                st.session_state[cache_key] = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)
                 st.success("Updated!")
                 st.rerun()
-            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_highlights', {'year': year, 'month': month}), st.success("Deleted!"), st.session_state.update({f"{area_filter}_monthly_highlights_cache": get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)}), st.rerun()), key=f"popover_highlight")
+            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_highlights', {'_id': h['_id']} if '_id' in h else {'year': year, 'month': month, 'user_id': current_user_id}), st.success("Deleted!"), st.rerun()), key=f"popover_highlight")
         else:
             with st.form(key="add_highlight_form"):
                 pos_new = st.text_area("Positives (one per line)", key="add_highlight_pos")
@@ -101,34 +100,28 @@ def _modal_dialog():
                         'positive': [{'title': t.strip()} for t in pos_new.splitlines() if t.strip()],
                         'negative': [{'title': t.strip()} for t in neg_new.splitlines() if t.strip()]
                     })
-                    # Atualizar cache apenas após salvar
-                    cache_key = f"{area_filter}_monthly_highlights_cache"
-                    st.session_state[cache_key] = get_collection_data_by_area('monthly_highlights', include_id=True, area_filter=area_filter)
                     st.success("Added!")
                     st.rerun()
 
     with tab_map["Opportunities"]:
         set_active_tab("Opportunities")
-        years = sorted({o.get('year') for o in get_collection_data_by_area('monthly_opportunities', area_filter=area_filter) if o.get('year')})
-        
-        # Se não há anos disponíveis, usar o ano atual
+        all_opportunities = get_collection_data_by_area('monthly_opportunities', area_filter=area_filter, include_id=True)
+        years = sorted({o.get('year') for o in all_opportunities if o.get('year') and o.get('user_id') == obj_user_id})
         if not years:
             years = [datetime.now().year]
-            
         col1, col2 = st.columns(2)
         with col1:
             year = st.selectbox("Year", options=years, index=years.index(datetime.now().year) if datetime.now().year in years else 0, key="opp_year", on_change=lambda: set_active_tab("Opportunities"))
         with col2:
-            month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.get("opp_month", datetime.now().month), step=1, key="opp_month", on_change=lambda: set_active_tab("Opportunities"))
-        
-        # Validar que year e month não são None
-        if year is None:
-            year = datetime.now().year
-        if month is None:
-            month = datetime.now().month
-            
-        opportunities = get_collection_data_by_area('monthly_opportunities', area_filter=area_filter)
-        filtered = [o for o in opportunities if o.get('year') == year and o.get('month') == month]
+            months_for_year = sorted({o.get('month') for o in all_opportunities if o.get('year') == year and o.get('month') and o.get('user_id') == obj_user_id})
+            if not months_for_year:
+                months_for_year = [datetime.now().month]
+            month = st.selectbox("Month", options=months_for_year, index=0, key="opp_month", on_change=lambda: set_active_tab("Opportunities"))
+        opportunities = get_collection_data_by_area('monthly_opportunities', area_filter=area_filter, include_id=True)
+        filtered = [
+            o for o in opportunities
+            if o.get('year') == year and o.get('month') == month and o.get('user_id') == obj_user_id
+        ]
         st.write("### Opportunities for selected month/year")
         if filtered:
             o = filtered[0]
@@ -149,7 +142,8 @@ def _modal_dialog():
                         'improvements': [im.strip() for im in improvements[i].splitlines() if im.strip()],
                         'user_id': current_user_id
                     })
-                update_document('monthly_opportunities', {'year': year, 'month': month}, {
+                filter_query = {'_id': o['_id']} if '_id' in o else {'year': year, 'month': month, 'user_id': current_user_id}
+                update_document('monthly_opportunities', filter_query, {
                     'year': year,
                     'month': month,
                     'user_id': current_user_id,
@@ -158,7 +152,7 @@ def _modal_dialog():
                 })
                 st.success("Updated!")
                 st.rerun()
-            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_opportunities', {'year': year, 'month': month}), st.success("Deleted!"), st.rerun()), key=f"popover_opp")
+            confirm_delete(":material/delete: Delete", lambda: (delete_document('monthly_opportunities', {'_id': o['_id']} if '_id' in o else {'year': year, 'month': month, 'user_id': current_user_id}), st.success("Deleted!"), st.rerun()), key=f"popover_opp")
         else:
             with st.form(key="add_opp_form"):
                 title_new = st.text_input("Title", key="add_opp_title")
@@ -185,26 +179,23 @@ def _modal_dialog():
 
     with tab_map["Action Plans"]:
         set_active_tab("Action Plans")
-        years = sorted({p.get('created_at').year for p in get_collection_data_by_area('action_plans', area_filter=area_filter) if p.get('created_at') and hasattr(p.get('created_at'), 'year')})
-        
-        # Se não há anos disponíveis, usar o ano atual
+        all_plans = get_collection_data_by_area('action_plans', area_filter=area_filter, include_id=True)
+        years = sorted({p.get('created_at').year for p in all_plans if p.get('created_at') and hasattr(p.get('created_at'), 'year') and p.get('user_id') == obj_user_id})
         if not years:
             years = [datetime.now().year]
-        
         col1, col2 = st.columns(2)
         with col1:
             year = st.selectbox("Year", options=years, index=years.index(datetime.now().year) if datetime.now().year in years else 0, key="plan_year", on_change=lambda: set_active_tab("Action Plans"))
         with col2:
-            month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.get("plan_month", datetime.now().month), step=1, key="plan_month", on_change=lambda: set_active_tab("Action Plans"))
-        
-        # Validar que year e month não são None
-        if year is None:
-            year = datetime.now().year
-        if month is None:
-            month = datetime.now().month
-            
+            months_for_year = sorted({p.get('created_at').month for p in all_plans if p.get('created_at') and hasattr(p.get('created_at'), 'year') and p['created_at'].year == year and hasattr(p.get('created_at'), 'month') and p.get('user_id') == obj_user_id})
+            if not months_for_year:
+                months_for_year = [datetime.now().month]
+            month = st.selectbox("Month", options=months_for_year, index=0, key="plan_month", on_change=lambda: set_active_tab("Action Plans"))
         plans = get_collection_data_by_area('action_plans', area_filter=area_filter, include_id=True)
-        filtered = [p for p in plans if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == year and p['created_at'].month == month]
+        filtered = [
+            p for p in plans
+            if hasattr(p.get('created_at', None), 'year') and p['created_at'].year == year and p['created_at'].month == month and p.get('user_id') == obj_user_id
+        ]
         st.write("### Action Plan for selected month/year")
         def generate_id(prefix, existing):
             idx = 1
@@ -274,7 +265,6 @@ def _modal_dialog():
                             if st.button(":material/delete:", key=f"remove_action_{sidx}_{aidx}"):
                                 sub['actions'].pop(aidx)
                                 action_changed = True
-                        # Garantir id
                         if 'id' not in a or not a['id']:
                             a['id'] = f"a{aidx+1}"
                 if action_changed:
@@ -282,20 +272,17 @@ def _modal_dialog():
                 if st.button(":material/add: Add Action", key=f"add_action_{sidx}"):
                     if 'actions' not in sub:
                         sub['actions'] = []
-                    # Gerar id único
                     existing_ids = {a['id'] for a in sub['actions'] if 'id' in a}
                     new_id = generate_id('a', existing_ids)
                     sub['actions'].append({
                         'id': new_id, 'title': '', 'status': '', 'due_date': datetime(year, month, 1), 'responsible': ''
                     })
                     st.rerun()
-                # Garantir id do subplan
                 if 'id' not in sub or not sub['id']:
                     sub['id'] = f"sub{sidx+1}"
         if subplan_changed:
             st.rerun()
         if st.button(":material/add: Add Subplan", key="add_subplan"):
-            # Gerar id único
             existing_ids = {s['id'] for s in plan_state['subplans'] if 'id' in s}
             new_id = generate_id('sub', existing_ids)
             plan_state['subplans'].append({
@@ -312,7 +299,6 @@ def _modal_dialog():
                     elif hasattr(obj, 'year') and hasattr(obj, 'month') and hasattr(obj, 'day'):
                         return datetime(obj.year, obj.month, obj.day)
                     return obj
-                # Sincronizar subplans/actions dos widgets
                 new_subplans = []
                 for sidx, sub in enumerate(plan_state['subplans']):
                     new_sub = {
@@ -336,10 +322,10 @@ def _modal_dialog():
                 plan_state['subplans'] = new_subplans
                 plan_state['created_at'] = ensure_datetime(plan_state.get('created_at'))
                 try:
-                    plan_state['user_id'] = current_user_id
+                    plan_state['user_id'] = ObjectId(current_user_id)
                     plan_state['area'] = area_filter
                     if filtered:
-                        filter_query = {'_id': filtered[0]['_id']}
+                        filter_query = {'_id': filtered[0]['_id']} if '_id' in filtered[0] else {'year': year, 'month': month, 'user_id': current_user_id}
                         update_document('action_plans', filter_query, plan_state)
                         st.success("Updated!")
                     else:
@@ -351,7 +337,7 @@ def _modal_dialog():
         with col_delete:
             def delete_plan():
                 try:
-                    filter_query = {'_id': filtered[0]['_id']}
+                    filter_query = {'_id': filtered[0]['_id']} if filtered and '_id' in filtered[0] else {'year': year, 'month': month, 'user_id': current_user_id}
                     delete_document('action_plans', filter_query)
                     st.success("Deleted!")
                     st.session_state['modal_open'] = False

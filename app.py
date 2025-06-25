@@ -76,14 +76,29 @@ def login_user(email: str, password: str) -> bool:
         st.session_state['user'] = email
         st.session_state['user_data'] = user
         st.session_state['authenticated'] = True
+        # Limpar cache/modal do session_state ao fazer login
+        modal_keys = [
+            'show_manage_modal', 'modal_page', 'active_modal_tab', 'modal_open',
+            'permit_action_plans_cache', 'permit_monthly_highlights_cache', 'permit_monthly_opportunities_cache',
+            'timesheet_action_plans_cache', 'timesheet_monthly_highlights_cache', 'timesheet_monthly_opportunities_cache',
+            'accounting_action_plans_cache', 'accounting_monthly_highlights_cache', 'accounting_monthly_opportunities_cache',
+        ]
+        for k in modal_keys:
+            if k in st.session_state:
+                del st.session_state[k]
+        # Limpar também todos os *_data_cache
+        for k in list(st.session_state.keys()):
+            if k.endswith('_data_cache'):
+                del st.session_state[k]
         return True
     return False
 
 def logout_user():
-    """Clear session state and logout user"""
-    st.session_state['user'] = None
-    st.session_state['user_data'] = None
-    st.session_state['authenticated'] = False
+    """Clear session state and logout user, removing all user/session/cache data."""
+    # Limpar todas as chaves do session_state, exceto as internas do Streamlit
+    for k in list(st.session_state.keys()):
+        if not k.startswith('_'):
+            del st.session_state[k]
 
 def show_login():
     """Display login screen"""

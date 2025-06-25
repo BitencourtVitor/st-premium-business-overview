@@ -92,21 +92,23 @@ def get_collection_data_by_area(collection_name, include_id=False, area_filter=N
                 user_ids = get_users_by_role('timesheet_admin')
             elif area_filter == 'permit':
                 user_ids = get_users_by_role('permits_admin')
+            elif area_filter == 'accounting':
+                user_ids = get_users_by_role('accounting_admin')
             else:
                 user_ids = []
-            
             if user_ids:
-                # Converter strings para ObjectId
                 user_object_ids = [ObjectId(user_id) for user_id in user_ids]
-                # Filtrar por área OU por user_id (para dados existentes)
-                filter_query = {
-                    "$or": [
-                        {"area": area_filter},
-                        {"user_id": {"$in": user_object_ids}}
-                    ]
-                }
+                # Se for action_plans, filtrar E (não OU)
+                if collection_name == 'action_plans':
+                    filter_query = {"user_id": {"$in": user_object_ids}, "area": area_filter}
+                else:
+                    filter_query = {
+                        "$or": [
+                            {"area": area_filter},
+                            {"user_id": {"$in": user_object_ids}}
+                        ]
+                    }
             else:
-                # Se não há usuários com a role, filtrar apenas por área
                 filter_query = {"area": area_filter}
         else:
             filter_query = {}

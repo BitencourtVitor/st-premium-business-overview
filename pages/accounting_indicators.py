@@ -76,7 +76,7 @@ def show_screen(user_data):
     selected_year = st.session_state['selected_year_accounting_indicators']
     selected_month = st.session_state['selected_month_accounting_indicators']
     # --- USAR DADOS DO MONGODB PARA OS CARDS LATERAIS ---
-    action_plans = st.session_state.get('accounting_action_plans_cache', [])
+    action_plans = get_collection_data_by_area('action_plans', area_filter='accounting')
     monthly_highlights = st.session_state.get('accounting_monthly_highlights_cache', [])
     monthly_opportunities = st.session_state.get('accounting_monthly_opportunities_cache', [])
     # Filtrar conforme ano/mês selecionados
